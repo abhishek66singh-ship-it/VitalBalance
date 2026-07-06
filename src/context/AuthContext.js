@@ -24,19 +24,28 @@ export function AuthProvider({ children }) {
   const [authError, setAuthError] = useState(null);
 
   // --- Google Sign-In (Expo AuthSession) ---
+  // Uses responseType "id_token" for web/iOS and "code" for Android native client.
+  // The androidClientId must be the native Android OAuth client (not the web client)
+  // created in Google Cloud Console with the SHA-1 fingerprint from EAS credentials.
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    scopes: ["profile", "email"],
   });
 
   useEffect(() => {
     if (response?.type === "success") {
-      const { id_token } = response.params;
-      const credential = GoogleAuthProvider.credential(id_token);
-      signInWithCredential(auth, credential).catch((e) => setAuthError(e.message));
+      // Android native client returns id_token directly; web flow also returns it.
+      const id_token = response.params?.id_token || response.authentication?.idToken;
+      if (id_token) {
+        const credential = GoogleAuthProvider.credential(id_token);
+        signInWithCredential(auth, credential).catch((e) => setAuthError(mapAuthError(e)));
+      } else {
+        setAuthError("Google sign-in failed — no ID token received. Please try again.");
+      }
     } else if (response?.type === "error") {
-      setAuthError("Google sign-in was cancelled or failed.");
+      setAuthError("Google sign-in was cancelled or failed. Please try again.");
     }
   }, [response]);
 

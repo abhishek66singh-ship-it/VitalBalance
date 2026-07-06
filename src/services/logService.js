@@ -2,7 +2,7 @@
 //
 // Schema:
 //   users/{uid}                          -> profile doc (see AuthContext.ensureUserDoc)
-//   users/{uid}/logs/{yyyy-mm-dd}         -> { date, items: [...], caloriesBurned, steps, createdAt, updatedAt }
+//   users/{uid}/logs/{yyyy-mm-dd}         -> { date, items: [...], caloriesBurned, steps, distanceKm, updatedAt }
 //   users/{uid}/favorites/{favoriteId}    -> saved "Favorite Meals" (FR-2.7)
 //
 // Each item logged inside a day doc looks like:
@@ -87,7 +87,7 @@ export async function getRecentLogs(uid, days = 7) {
 // Writes/updates the calories-burned (+ optional steps) value for a given day.
 // Currently called with the mocked activity value from HomeScreen — swap point
 // for real Apple Health / Google Fit / Fitbit sync later (FR-1.1-1.3).
-export async function setDayActivity(uid, dateKey, { caloriesBurned, steps } = {}) {
+export async function setDayActivity(uid, dateKey, { caloriesBurned, steps, distanceKm } = {}) {
   const ref = doc(db, "users", uid, "logs", dateKey);
   const current = await getDayLog(uid, dateKey);
   await setDoc(
@@ -97,6 +97,7 @@ export async function setDayActivity(uid, dateKey, { caloriesBurned, steps } = {
       items: current.items || [],
       caloriesBurned: caloriesBurned ?? current.caloriesBurned ?? 0,
       steps: steps ?? current.steps ?? 0,
+      distanceKm: distanceKm ?? current.distanceKm ?? 0,
       updatedAt: new Date().toISOString(),
     },
     { merge: true }

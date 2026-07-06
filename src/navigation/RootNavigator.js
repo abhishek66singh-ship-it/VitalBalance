@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, ActivityIndicator, Text, TouchableOpacity } from "react-native";
+import { View, ActivityIndicator, Text, TouchableOpacity, Platform } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -36,7 +36,18 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: "#C8BFAF",
-        tabBarStyle: { borderTopColor: theme.colors.border, height: 60, paddingBottom: 8, paddingTop: 8 },
+        tabBarStyle: {
+          borderTopColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          height: Platform.OS === "android" ? 60 : 80,
+          paddingBottom: Platform.OS === "android" ? 8 : 24,
+          paddingTop: 8,
+          elevation: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "600",
+        },
       }}
     >
       <Tabs.Screen

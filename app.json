@@ -13,7 +13,9 @@
       "infoPlist": {
         "NSMotionUsageDescription": "VitalBalance uses your phone's motion sensor to count your steps and estimate calories burned throughout the day — just like a built-in pedometer.",
         "NSHealthShareUsageDescription": "VitalBalance reads step count from your device motion sensor to track daily activity.",
-        "UIBackgroundModes": ["processing"]
+        "UIBackgroundModes": [
+          "processing"
+        ]
       }
     },
     "android": {
@@ -40,6 +42,11 @@
           "motionPermission": "VitalBalance uses your phone's motion sensor to count your steps and estimate calories burned throughout the day."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a7ea14ae-088b-46a6-9685-db04eaf80b9b"
+      }
+    }
   }
 }

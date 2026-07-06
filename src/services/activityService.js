@@ -11,13 +11,13 @@
 
 import { Pedometer } from "expo-sensors";
 
-// Average calories burned per step, scaled by body weight. This mirrors the
-// standard industry estimation formula (the same one used by mainstream
-// step-counting apps): roughly 0.04 kcal per step for a 70kg person, scaling
-// linearly with weight — i.e. calories ≈ steps × 0.04 × (weight_kg / 70).
 const KCAL_PER_STEP_AT_70KG = 0.04;
 const REFERENCE_WEIGHT_KG = 70;
-const DEFAULT_WEIGHT_KG = 65; // fallback if profile weight isn't set yet
+const DEFAULT_WEIGHT_KG = 65;
+
+// Average stride length in km — used to estimate distance from steps.
+// Standard estimate: ~0.762m per step for average adult height.
+const STRIDE_LENGTH_KM = 0.000762;
 
 export async function isPedometerAvailable() {
   try {
@@ -36,7 +36,6 @@ export async function requestPedometerPermission() {
   }
 }
 
-// Steps since midnight today, read directly from the device sensor.
 export async function getTodayStepCount() {
   const end = new Date();
   const start = new Date();
@@ -49,34 +48,36 @@ export async function getTodayStepCount() {
   }
 }
 
-// Live subscription — call the returned unsubscribe function (e.g. in a
-// useEffect cleanup) when done. delta.steps is the count since subscribing,
-// so callers should add it to the steps already read via getTodayStepCount().
 export function subscribeToStepUpdates(onUpdate) {
   return Pedometer.watchStepCount((result) => {
     onUpdate(result.steps);
   });
 }
 
-// Estimates calories burned from a real step count + the user's weight from
-// onboarding. This is the same approach Step Set Go and similar apps use —
-// steps are real (sensor-measured), calories are a standard estimate.
 export function estimateCaloriesFromSteps(steps, weightKg = DEFAULT_WEIGHT_KG) {
   return Math.round(steps * KCAL_PER_STEP_AT_70KG * (weightKg / REFERENCE_WEIGHT_KG));
 }
 
-// Convenience: does both reads + the calorie estimate in one call, for use on
-// screen load. Returns { steps, caloriesBurned, available }.
-export async function getTodayActivity(weightKg) {
+// Estimates distance in km from step count using average stride length.
+// Same approach used by Google Fit, Samsung Health, etc.
+export function estimateDistanceFromSteps(steps, heightCm = 170) {
+  // Adjust stride length by height: taller people have longer strides.
+  const heightFactor = heightCm / 170;
+  const adjustedStride = STRIDE_LENGTH_KM * heightFactor;
+  return Math.round(steps * adjustedStride * 100) / 100; // round to 2 decimals
+}
+
+export async function getTodayActivity(weightKg, heightCm) {
   const available = await isPedometerAvailable();
   if (!available) {
-    return { steps: 0, caloriesBurned: 0, available: false };
+    return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
   }
   const granted = await requestPedometerPermission();
   if (!granted) {
-    return { steps: 0, caloriesBurned: 0, available: false };
+    return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
   }
   const steps = await getTodayStepCount();
   const caloriesBurned = estimateCaloriesFromSteps(steps, weightKg);
-  return { steps, caloriesBurned, available: true };
+  const distanceKm = estimateDistanceFromSteps(steps, heightCm);
+  return { steps, caloriesBurned, distanceKm, available: true };
 }

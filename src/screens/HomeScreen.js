@@ -1,11 +1,17 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { Flame, Footprints, Droplet, Plus, Sparkles, Coffee, TrendingUp } from "lucide-react-native";
+import { Flame, Footprints, Droplet, Plus, Sparkles, Coffee, TrendingUp, MapPin } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { getDayLog, todayKey, getRecentLogs, setDayActivity } from "../services/logService";
-import { getTodayActivity, subscribeToStepUpdates, estimateCaloriesFromSteps, isPedometerAvailable } from "../services/activityService";
+import {
+  getTodayActivity,
+  subscribeToStepUpdates,
+  estimateCaloriesFromSteps,
+  estimateDistanceFromSteps,
+  isPedometerAvailable,
+} from "../services/activityService";
 import { generateInsights } from "../services/aiCoach";
 import { MEAL_TYPES, MEAL_LABELS } from "../data/foodLibrary";
 import { theme } from "../theme";
@@ -25,28 +31,25 @@ export default function HomeScreen({ navigation }) {
   const { user, profile } = useAuth();
   const [todayItems, setTodayItems] = useState([]);
   const [recentLogs, setRecentLogs] = useState([]);
-  const [activity, setActivity] = useState({ caloriesBurned: 0, steps: 0 });
+  const [activity, setActivity] = useState({ caloriesBurned: 0, steps: 0, distanceKm: 0 });
   const [pedometerAvailable, setPedometerAvailable] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const baseStepsRef = useRef(0); // steps read at load time, before live subscription deltas
+  const baseStepsRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!user) return;
     const key = todayKey();
     const weightKg = profile?.weightKg;
+    const heightCm = profile?.heightCm;
 
-    // Real step count from the phone's built-in pedometer sensor (same source
-    // Step Set Go and similar apps use). Calories are estimated from those real
-    // steps using the verified industry formula — see activityService.js.
-    const liveActivity = await getTodayActivity(weightKg);
+    const liveActivity = await getTodayActivity(weightKg, heightCm);
     setPedometerAvailable(liveActivity.available);
     baseStepsRef.current = liveActivity.steps;
 
-    // Always overwrite Firestore with the fresh sensor reading so stale mock
-    // data from previous builds never persists in Trends history.
     await setDayActivity(user.uid, key, {
       steps: liveActivity.available ? liveActivity.steps : 0,
       caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : 0,
+      distanceKm: liveActivity.available ? liveActivity.distanceKm : 0,
     });
 
     const [day, recent] = await Promise.all([
@@ -55,15 +58,12 @@ export default function HomeScreen({ navigation }) {
     ]);
     setTodayItems(day.items || []);
     setRecentLogs(recent);
-    // Always use the live sensor reading for today's display — never the
-    // Firestore cached value, which may contain stale mock data from a previous
-    // build. Firestore is written to (setDayActivity above) so Trends has
-    // history, but the dashboard always shows what the sensor says right now.
     setActivity({
       caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : (day.caloriesBurned ?? 0),
       steps: liveActivity.available ? liveActivity.steps : (day.steps ?? 0),
+      distanceKm: liveActivity.available ? liveActivity.distanceKm : (day.distanceKm ?? 0),
     });
-  }, [user, profile?.weightKg]);
+  }, [user, profile?.weightKg, profile?.heightCm]);
 
   useFocusEffect(
     useCallback(() => {
@@ -71,8 +71,7 @@ export default function HomeScreen({ navigation }) {
     }, [load])
   );
 
-  // Live step updates while the Home screen is open, so the count ticks up in
-  // real time as the user walks — exactly like a dedicated pedometer app.
+  // Live step updates while Home screen is open — ticks up in real time as user walks.
   useEffect(() => {
     let subscription;
     (async () => {
@@ -81,15 +80,17 @@ export default function HomeScreen({ navigation }) {
       subscription = subscribeToStepUpdates((deltaSteps) => {
         const totalSteps = baseStepsRef.current + deltaSteps;
         const weightKg = profile?.weightKg;
+        const heightCm = profile?.heightCm;
         const caloriesBurned = estimateCaloriesFromSteps(totalSteps, weightKg);
-        setActivity({ steps: totalSteps, caloriesBurned });
+        const distanceKm = estimateDistanceFromSteps(totalSteps, heightCm);
+        setActivity({ steps: totalSteps, caloriesBurned, distanceKm });
         if (user) {
-          setDayActivity(user.uid, todayKey(), { steps: totalSteps, caloriesBurned }).catch(() => {});
+          setDayActivity(user.uid, todayKey(), { steps: totalSteps, caloriesBurned, distanceKm }).catch(() => {});
         }
       });
     })();
     return () => subscription?.remove();
-  }, [user, profile?.weightKg]);
+  }, [user, profile?.weightKg, profile?.heightCm]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -113,21 +114,25 @@ export default function HomeScreen({ navigation }) {
   });
 
   return (
+    // Fix for Android bottom nav: use edges={["top"]} so SafeAreaView only
+    // handles the status bar, and let the tab navigator handle bottom insets.
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 30 }}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
         <View style={styles.header}>
           <Text style={styles.dateText}>{formatToday()}</Text>
-          <Text style={styles.greeting}>{greeting()}{profile?.displayName ? `, ${firstName(profile.displayName)}` : ""}</Text>
+          <Text style={styles.greeting}>
+            {greeting()}{profile?.displayName ? `, ${firstName(profile.displayName)}` : ""}
+          </Text>
         </View>
 
         {!pedometerAvailable && (
           <View style={styles.permissionBanner}>
             <Footprints size={14} color={theme.colors.accentWarn} />
             <Text style={styles.permissionText}>
-              Step tracking unavailable — enable Motion & Fitness in Settings to auto-track your steps and calories burned.
+              Step tracking unavailable — enable Motion & Fitness in Settings to auto-track steps and calories burned.
             </Text>
           </View>
         )}
@@ -161,10 +166,12 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
+        {/* Stats row — 4 pills: burned, steps, distance, water */}
         <View style={styles.statsRow}>
-          <StatPill icon={Flame} label="Burned" value={burned} />
-          <StatPill icon={Footprints} label="Steps" value={activity.steps.toLocaleString()} />
-          <StatPill icon={Droplet} label="Water" value="1.2L" />
+          <StatPill icon={Flame} label="Burned" value={`${burned}`} unit="kcal" />
+          <StatPill icon={Footprints} label="Steps" value={activity.steps.toLocaleString()} unit="steps" />
+          <StatPill icon={MapPin} label="Distance" value={`${activity.distanceKm}`} unit="km" />
+          <StatPill icon={Droplet} label="Water" value="—" unit="L" />
         </View>
 
         <Text style={styles.sectionTitle}>Macros</Text>
@@ -189,7 +196,9 @@ export default function HomeScreen({ navigation }) {
                 <View>
                   <Text style={styles.mealName}>{MEAL_LABELS[m]}</Text>
                   <Text style={styles.mealSub}>
-                    {items.length === 0 ? "Not logged yet" : `${items.length} item${items.length > 1 ? "s" : ""} \u00b7 ${mealKcal} kcal`}
+                    {items.length === 0
+                      ? "Not logged yet"
+                      : `${items.length} item${items.length > 1 ? "s" : ""} \u00b7 ${mealKcal} kcal`}
                   </Text>
                 </View>
                 <View style={styles.addButton}>
@@ -211,11 +220,12 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-function StatPill({ icon: Icon, label, value }) {
+function StatPill({ icon: Icon, label, value, unit }) {
   return (
     <View style={styles.statPill}>
-      <Icon size={16} color={theme.colors.primary} />
+      <Icon size={15} color={theme.colors.primary} />
       <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statUnit}>{unit}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -249,6 +259,7 @@ function firstName(name) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.background },
+  scrollContent: { paddingBottom: Platform.OS === "android" ? 90 : 30 },
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
   dateText: { fontSize: 13, color: theme.colors.textMuted },
   greeting: { fontSize: 22, fontWeight: "700", color: theme.colors.text, fontFamily: theme.fonts.display },
@@ -265,29 +276,22 @@ const styles = StyleSheet.create({
   coachRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
   coachText: { flex: 1, fontSize: 13, lineHeight: 18, color: "#EFEAE0" },
   balanceCard: {
-    margin: 20,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    flexDirection: "row",
-    alignItems: "center",
+    margin: 20, backgroundColor: theme.colors.surface, borderRadius: 22,
+    padding: 18, borderWidth: 1, borderColor: theme.colors.border,
+    flexDirection: "row", alignItems: "center",
   },
   balanceLabel: { fontSize: 11, color: theme.colors.textMuted },
   balanceValue: { fontSize: 22, fontWeight: "700", fontFamily: theme.fonts.display },
   balanceSub: { fontSize: 11, color: theme.colors.textMuted, marginTop: 4 },
-  statsRow: { flexDirection: "row", gap: 10, paddingHorizontal: 20 },
+  statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20 },
   statPill: {
-    flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    flex: 1, backgroundColor: theme.colors.surface, borderRadius: 14,
+    padding: 10, borderWidth: 1, borderColor: theme.colors.border,
+    alignItems: "flex-start",
   },
-  statValue: { fontSize: 17, fontWeight: "700", color: theme.colors.text, marginTop: 6, fontFamily: theme.fonts.display },
-  statLabel: { fontSize: 10.5, color: theme.colors.textMuted, marginTop: 1 },
+  statValue: { fontSize: 15, fontWeight: "700", color: theme.colors.text, marginTop: 5, fontFamily: theme.fonts.display },
+  statUnit: { fontSize: 9, color: theme.colors.textMuted },
+  statLabel: { fontSize: 10, color: theme.colors.textMuted, marginTop: 1 },
   sectionTitle: { marginHorizontal: 20, marginTop: 18, marginBottom: 8, fontSize: 13, fontWeight: "700", color: theme.colors.text },
   macroCard: { flex: 1, backgroundColor: theme.colors.surface, borderRadius: 14, padding: 10, borderWidth: 1, borderColor: theme.colors.border },
   macroLabel: { fontSize: 12, fontWeight: "600", color: theme.colors.textSubtle },
