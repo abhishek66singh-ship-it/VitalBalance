@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -7,10 +7,10 @@ import { useAuth } from "../context/AuthContext";
 import { getDayLog, todayKey, getRecentLogs, setDayActivity } from "../services/logService";
 import {
   getTodayActivity,
-  subscribeToStepUpdates,
   estimateCaloriesFromSteps,
   estimateDistanceFromSteps,
   isPedometerAvailable,
+  getTodayStepCount,
 } from "../services/activityService";
 import { generateInsights } from "../services/aiCoach";
 import { MEAL_TYPES, MEAL_LABELS } from "../data/foodLibrary";
@@ -34,7 +34,6 @@ export default function HomeScreen({ navigation }) {
   const [activity, setActivity] = useState({ caloriesBurned: 0, steps: 0, distanceKm: 0 });
   const [pedometerAvailable, setPedometerAvailable] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const baseStepsRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -44,13 +43,15 @@ export default function HomeScreen({ navigation }) {
 
     const liveActivity = await getTodayActivity(weightKg, heightCm);
     setPedometerAvailable(liveActivity.available);
-    baseStepsRef.current = liveActivity.steps;
 
-    await setDayActivity(user.uid, key, {
-      steps: liveActivity.available ? liveActivity.steps : 0,
-      caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : 0,
-      distanceKm: liveActivity.available ? liveActivity.distanceKm : 0,
-    });
+    // Only write to Firestore from phone — never from web (no sensor there).
+    if (liveActivity.available) {
+      await setDayActivity(user.uid, key, {
+        steps: liveActivity.steps,
+        caloriesBurned: liveActivity.caloriesBurned,
+        distanceKm: liveActivity.distanceKm,
+      });
+    }
 
     const [day, recent] = await Promise.all([
       getDayLog(user.uid, key),
@@ -58,6 +59,8 @@ export default function HomeScreen({ navigation }) {
     ]);
     setTodayItems(day.items || []);
     setRecentLogs(recent);
+    // Phone: show live sensor reading.
+    // Web: show Firestore value written by the phone.
     setActivity({
       caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : (day.caloriesBurned ?? 0),
       steps: liveActivity.available ? liveActivity.steps : (day.steps ?? 0),
@@ -71,25 +74,28 @@ export default function HomeScreen({ navigation }) {
     }, [load])
   );
 
-  // Live step updates while Home screen is open — ticks up in real time as user walks.
+  // Poll every 30 seconds instead of using a delta-based subscription.
+  // The subscription approach caused steps to reset to 0 on reopen because
+  // it depended on a ref that wasn't set yet. Polling always reads the
+  // absolute step total from midnight — reliable and never resets.
   useEffect(() => {
-    let subscription;
-    (async () => {
+    if (!user) return;
+    const weightKg = profile?.weightKg;
+    const heightCm = profile?.heightCm;
+
+    const poll = async () => {
       const available = await isPedometerAvailable();
       if (!available) return;
-      subscription = subscribeToStepUpdates((deltaSteps) => {
-        const totalSteps = baseStepsRef.current + deltaSteps;
-        const weightKg = profile?.weightKg;
-        const heightCm = profile?.heightCm;
-        const caloriesBurned = estimateCaloriesFromSteps(totalSteps, weightKg);
-        const distanceKm = estimateDistanceFromSteps(totalSteps, heightCm);
-        setActivity({ steps: totalSteps, caloriesBurned, distanceKm });
-        if (user) {
-          setDayActivity(user.uid, todayKey(), { steps: totalSteps, caloriesBurned, distanceKm }).catch(() => {});
-        }
-      });
-    })();
-    return () => subscription?.remove();
+      const steps = await getTodayStepCount();
+      if (steps === 0) return; // never overwrite real data with a zero reading
+      const caloriesBurned = estimateCaloriesFromSteps(steps, weightKg);
+      const distanceKm = estimateDistanceFromSteps(steps, heightCm);
+      setActivity({ steps, caloriesBurned, distanceKm });
+      setDayActivity(user.uid, todayKey(), { steps, caloriesBurned, distanceKm }).catch(() => {});
+    };
+
+    const interval = setInterval(poll, 30000); // every 30 seconds
+    return () => clearInterval(interval);
   }, [user, profile?.weightKg, profile?.heightCm]);
 
   async function onRefresh() {
