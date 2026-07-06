@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Deploy with: firebase deploy --only firestore:rules
+// (requires the Firebase CLI: npm install -g firebase-tools, then `firebase login`
+// and `firebase init firestore` once in this project, pointing at this file.)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users can only read/write their own profile document.
+    match /users/{userId} {
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+      // Creation happens via ensureUserDoc() right after sign-up/sign-in.
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false; // account deletion should go through a server-side flow later
+
+      // Daily food logs — only the owning user can read/write.
+      match /logs/{dateKey} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Favorite meals — only the owning user can read/write.
+      match /favorites/{favoriteId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // Shared food database (read-only for all signed-in users; written only
+    // via the Firebase Console or an admin script, never from the client).
+    match /foods/{foodId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}

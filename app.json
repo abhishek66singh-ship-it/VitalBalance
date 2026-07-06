@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "VitalBalance",
+    "slug": "vitalbalance",
+    "scheme": "vitalbalance",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vitalbalance.app",
+      "infoPlist": {
+        "NSMotionUsageDescription": "VitalBalance uses your phone's motion sensor to count your steps and estimate calories burned throughout the day — just like a built-in pedometer.",
+        "NSHealthShareUsageDescription": "VitalBalance reads step count from your device motion sensor to track daily activity.",
+        "UIBackgroundModes": ["processing"]
+      }
+    },
+    "android": {
+      "package": "com.vitalbalance.app",
+      "permissions": [
+        "ACTIVITY_RECOGNITION",
+        "android.permission.ACTIVITY_RECOGNITION"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF6F0",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "VitalBalance uses your phone's motion sensor to count your steps and estimate calories burned throughout the day."
+        }
+      ]
+    ]
+  }
+}
