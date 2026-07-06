@@ -5,26 +5,15 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Flame, Footprints, Droplet, Plus, Sparkles, Coffee, TrendingUp, MapPin } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { getDayLog, todayKey, getRecentLogs, setDayActivity } from "../services/logService";
-import {
-  getTodayActivity,
-  estimateCaloriesFromSteps,
-  estimateDistanceFromSteps,
-  isPedometerAvailable,
-  getTodayStepCount,
-} from "../services/activityService";
+import { getTodayActivity, estimateCaloriesFromSteps, estimateDistanceFromSteps, isPedometerAvailable, getTodayStepCount } from "../services/activityService";
 import { generateInsights } from "../services/aiCoach";
 import { MEAL_TYPES, MEAL_LABELS } from "../data/foodLibrary";
 import { theme } from "../theme";
 import ProgressRing from "../components/ProgressRing";
 
 const INSIGHT_ICONS = {
-  pattern: Coffee,
-  nudge: Coffee,
-  deviation: TrendingUp,
-  macro_gap: Sparkles,
-  positive: Flame,
-  safety_fallback: Sparkles,
-  activity_nudge: Footprints,
+  pattern: Coffee, nudge: Coffee, deviation: TrendingUp,
+  macro_gap: Sparkles, positive: Flame, safety_fallback: Sparkles, activity_nudge: Footprints,
 };
 
 export default function HomeScreen({ navigation }) {
@@ -44,7 +33,6 @@ export default function HomeScreen({ navigation }) {
     const liveActivity = await getTodayActivity(weightKg, heightCm);
     setPedometerAvailable(liveActivity.available);
 
-    // Only write to Firestore from phone — never from web (no sensor there).
     if (liveActivity.available) {
       await setDayActivity(user.uid, key, {
         steps: liveActivity.steps,
@@ -59,8 +47,6 @@ export default function HomeScreen({ navigation }) {
     ]);
     setTodayItems(day.items || []);
     setRecentLogs(recent);
-    // Phone: show live sensor reading.
-    // Web: show Firestore value written by the phone.
     setActivity({
       caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : (day.caloriesBurned ?? 0),
       steps: liveActivity.available ? liveActivity.steps : (day.steps ?? 0),
@@ -68,41 +54,27 @@ export default function HomeScreen({ navigation }) {
     });
   }, [user, profile?.weightKg, profile?.heightCm]);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Poll every 30 seconds instead of using a delta-based subscription.
-  // The subscription approach caused steps to reset to 0 on reopen because
-  // it depended on a ref that wasn't set yet. Polling always reads the
-  // absolute step total from midnight — reliable and never resets.
   useEffect(() => {
     if (!user) return;
     const weightKg = profile?.weightKg;
     const heightCm = profile?.heightCm;
-
     const poll = async () => {
       const available = await isPedometerAvailable();
       if (!available) return;
       const steps = await getTodayStepCount();
-      if (steps === 0) return; // never overwrite real data with a zero reading
+      if (steps === 0) return;
       const caloriesBurned = estimateCaloriesFromSteps(steps, weightKg);
       const distanceKm = estimateDistanceFromSteps(steps, heightCm);
       setActivity({ steps, caloriesBurned, distanceKm });
       setDayActivity(user.uid, todayKey(), { steps, caloriesBurned, distanceKm }).catch(() => {});
     };
-
-    const interval = setInterval(poll, 30000); // every 30 seconds
+    const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, [user, profile?.weightKg, profile?.heightCm]);
 
-  async function onRefresh() {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  }
+  async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
 
   const consumed = todayItems.reduce((s, i) => s + i.kcal, 0);
   const protein = todayItems.reduce((s, i) => s + (i.proteinG || 0), 0);
@@ -112,16 +84,9 @@ export default function HomeScreen({ navigation }) {
   const net = consumed - burned;
   const target = profile?.dailyCalorieTarget || 2000;
 
-  const insights = generateInsights({
-    todayItems,
-    profile: profile || {},
-    caloriesBurned: burned,
-    recentLogs,
-  });
+  const insights = generateInsights({ todayItems, profile: profile || {}, caloriesBurned: burned, recentLogs });
 
   return (
-    // Fix for Android bottom nav: use edges={["top"]} so SafeAreaView only
-    // handles the status bar, and let the tab navigator handle bottom insets.
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -129,17 +94,13 @@ export default function HomeScreen({ navigation }) {
       >
         <View style={styles.header}>
           <Text style={styles.dateText}>{formatToday()}</Text>
-          <Text style={styles.greeting}>
-            {greeting()}{profile?.displayName ? `, ${firstName(profile.displayName)}` : ""}
-          </Text>
+          <Text style={styles.greeting}>{greeting()}{profile?.displayName ? `, ${firstName(profile.displayName)}` : ""}</Text>
         </View>
 
         {!pedometerAvailable && (
           <View style={styles.permissionBanner}>
             <Footprints size={14} color={theme.colors.accentWarn} />
-            <Text style={styles.permissionText}>
-              Step tracking unavailable — enable Motion & Fitness in Settings to auto-track steps and calories burned.
-            </Text>
+            <Text style={styles.permissionText}>Enable Motion & Fitness in Settings to track steps and calories burned.</Text>
           </View>
         )}
 
@@ -168,11 +129,10 @@ export default function HomeScreen({ navigation }) {
             <Text style={[styles.balanceValue, { color: net <= 0 ? theme.colors.primary : theme.colors.accentWarn }]}>
               {net > 0 ? "+" : ""}{net} kcal
             </Text>
-            <Text style={styles.balanceSub}>Burned {burned} \u2212 Consumed {consumed}</Text>
+            <Text style={styles.balanceSub}>Burned {burned} − Consumed {consumed}</Text>
           </View>
         </View>
 
-        {/* Stats row — 4 pills: burned, steps, distance, water */}
         <View style={styles.statsRow}>
           <StatPill icon={Flame} label="Burned" value={`${burned}`} unit="kcal" />
           <StatPill icon={Footprints} label="Steps" value={activity.steps.toLocaleString()} unit="steps" />
@@ -192,30 +152,17 @@ export default function HomeScreen({ navigation }) {
           const items = todayItems.filter((i) => i.mealType === m);
           const mealKcal = items.reduce((s, i) => s + i.kcal, 0);
           return (
-            <TouchableOpacity
-              key={m}
-              style={styles.mealCard}
-              onPress={() => navigation.navigate("FoodLogger", { mealType: m })}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity key={m} style={styles.mealCard} onPress={() => navigation.navigate("FoodLogger", { mealType: m })} activeOpacity={0.7}>
               <View style={styles.mealRow}>
                 <View>
                   <Text style={styles.mealName}>{MEAL_LABELS[m]}</Text>
-                  <Text style={styles.mealSub}>
-                    {items.length === 0
-                      ? "Not logged yet"
-                      : `${items.length} item${items.length > 1 ? "s" : ""} \u00b7 ${mealKcal} kcal`}
-                  </Text>
+                  <Text style={styles.mealSub}>{items.length === 0 ? "Not logged yet" : `${items.length} item${items.length > 1 ? "s" : ""} · ${mealKcal} kcal`}</Text>
                 </View>
-                <View style={styles.addButton}>
-                  <Plus size={16} color="#fff" />
-                </View>
+                <View style={styles.addButton}><Plus size={16} color="#fff" /></View>
               </View>
               {items.length > 0 && (
                 <View style={styles.emojiRow}>
-                  {items.map((it) => (
-                    <Text key={it.id} style={styles.emoji}>{it.emoji}</Text>
-                  ))}
+                  {items.map((it) => <Text key={it.id} style={styles.emoji}>{it.emoji}</Text>)}
                 </View>
               )}
             </TouchableOpacity>
@@ -259,9 +206,7 @@ function greeting() {
   if (h < 18) return "Good afternoon";
   return "Good evening";
 }
-function firstName(name) {
-  return name.split(" ")[0];
-}
+function firstName(name) { return name.split(" ")[0]; }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.background },
@@ -269,32 +214,19 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
   dateText: { fontSize: 13, color: theme.colors.textMuted },
   greeting: { fontSize: 22, fontWeight: "700", color: theme.colors.text, fontFamily: theme.fonts.display },
-  permissionBanner: {
-    flexDirection: "row", alignItems: "flex-start", gap: 8,
-    marginHorizontal: 20, marginTop: 10, padding: 12,
-    backgroundColor: "#FFF4EC", borderRadius: 12,
-    borderWidth: 1, borderColor: "#F0C9A4",
-  },
+  permissionBanner: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginHorizontal: 20, marginTop: 10, padding: 12, backgroundColor: "#FFF4EC", borderRadius: 12, borderWidth: 1, borderColor: "#F0C9A4" },
   permissionText: { flex: 1, fontSize: 12, color: theme.colors.accentWarn, lineHeight: 17 },
   coachCard: { margin: 20, marginBottom: 6, backgroundColor: theme.colors.primaryDark, borderRadius: 18, padding: 16 },
   coachHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
   coachLabel: { fontSize: 11, letterSpacing: 0.5, color: "#C9E4B5", fontWeight: "700" },
   coachRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
   coachText: { flex: 1, fontSize: 13, lineHeight: 18, color: "#EFEAE0" },
-  balanceCard: {
-    margin: 20, backgroundColor: theme.colors.surface, borderRadius: 22,
-    padding: 18, borderWidth: 1, borderColor: theme.colors.border,
-    flexDirection: "row", alignItems: "center",
-  },
+  balanceCard: { margin: 20, backgroundColor: theme.colors.surface, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: theme.colors.border, flexDirection: "row", alignItems: "center" },
   balanceLabel: { fontSize: 11, color: theme.colors.textMuted },
   balanceValue: { fontSize: 22, fontWeight: "700", fontFamily: theme.fonts.display },
   balanceSub: { fontSize: 11, color: theme.colors.textMuted, marginTop: 4 },
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20 },
-  statPill: {
-    flex: 1, backgroundColor: theme.colors.surface, borderRadius: 14,
-    padding: 10, borderWidth: 1, borderColor: theme.colors.border,
-    alignItems: "flex-start",
-  },
+  statPill: { flex: 1, backgroundColor: theme.colors.surface, borderRadius: 14, padding: 10, borderWidth: 1, borderColor: theme.colors.border, alignItems: "flex-start" },
   statValue: { fontSize: 15, fontWeight: "700", color: theme.colors.text, marginTop: 5, fontFamily: theme.fonts.display },
   statUnit: { fontSize: 9, color: theme.colors.textMuted },
   statLabel: { fontSize: 10, color: theme.colors.textMuted, marginTop: 1 },
