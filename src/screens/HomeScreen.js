@@ -10,12 +10,7 @@ import { generateInsights } from "../services/aiCoach";
 import { MEAL_TYPES, MEAL_LABELS } from "../data/foodLibrary";
 import { theme } from "../theme";
 import ProgressRing from "../components/ProgressRing";
-
-const INSIGHT_ICONS = {
-  pattern: Coffee, nudge: Coffee, deviation: TrendingUp,
-  macro_gap: Sparkles, positive: Flame, safety_fallback: Sparkles, activity_nudge: Footprints,
-};
-
+const INSIGHT_ICONS = { pattern: Coffee, nudge: Coffee, deviation: TrendingUp, macro_gap: Sparkles, positive: Flame, safety_fallback: Sparkles, activity_nudge: Footprints };
 export default function HomeScreen({ navigation }) {
   const { user, profile } = useAuth();
   const [todayItems, setTodayItems] = useState([]);
@@ -23,28 +18,17 @@ export default function HomeScreen({ navigation }) {
   const [activity, setActivity] = useState({ caloriesBurned: 0, steps: 0, distanceKm: 0 });
   const [pedometerAvailable, setPedometerAvailable] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
   const load = useCallback(async () => {
     if (!user) return;
     const key = todayKey();
     const weightKg = profile?.weightKg;
     const heightCm = profile?.heightCm;
-
     const liveActivity = await getTodayActivity(weightKg, heightCm);
     setPedometerAvailable(liveActivity.available);
-
     if (liveActivity.available) {
-      await setDayActivity(user.uid, key, {
-        steps: liveActivity.steps,
-        caloriesBurned: liveActivity.caloriesBurned,
-        distanceKm: liveActivity.distanceKm,
-      });
+      await setDayActivity(user.uid, key, { steps: liveActivity.steps, caloriesBurned: liveActivity.caloriesBurned, distanceKm: liveActivity.distanceKm });
     }
-
-    const [day, recent] = await Promise.all([
-      getDayLog(user.uid, key),
-      getRecentLogs(user.uid, 7),
-    ]);
+    const [day, recent] = await Promise.all([getDayLog(user.uid, key), getRecentLogs(user.uid, 7)]);
     setTodayItems(day.items || []);
     setRecentLogs(recent);
     setActivity({
@@ -53,9 +37,7 @@ export default function HomeScreen({ navigation }) {
       distanceKm: liveActivity.available ? liveActivity.distanceKm : (day.distanceKm ?? 0),
     });
   }, [user, profile?.weightKg, profile?.heightCm]);
-
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
   useEffect(() => {
     if (!user) return;
     const weightKg = profile?.weightKg;
@@ -73,9 +55,7 @@ export default function HomeScreen({ navigation }) {
     const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, [user, profile?.weightKg, profile?.heightCm]);
-
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
-
   const consumed = todayItems.reduce((s, i) => s + i.kcal, 0);
   const protein = todayItems.reduce((s, i) => s + (i.proteinG || 0), 0);
   const carbs = todayItems.reduce((s, i) => s + (i.carbsG || 0), 0);
@@ -83,71 +63,37 @@ export default function HomeScreen({ navigation }) {
   const burned = activity.caloriesBurned;
   const net = consumed - burned;
   const target = profile?.dailyCalorieTarget || 2000;
-
   const insights = generateInsights({ todayItems, profile: profile || {}, caloriesBurned: burned, recentLogs });
-
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}>
         <View style={styles.header}>
           <Text style={styles.dateText}>{formatToday()}</Text>
           <Text style={styles.greeting}>{greeting()}{profile?.displayName ? `, ${firstName(profile.displayName)}` : ""}</Text>
         </View>
-
-        {!pedometerAvailable && (
-          <View style={styles.permissionBanner}>
-            <Footprints size={14} color={theme.colors.accentWarn} />
-            <Text style={styles.permissionText}>Enable Motion & Fitness in Settings to track steps and calories burned.</Text>
-          </View>
-        )}
-
-        {insights.length > 0 && (
-          <View style={styles.coachCard}>
-            <View style={styles.coachHeader}>
-              <Sparkles size={14} color="#C9E4B5" />
-              <Text style={styles.coachLabel}>AI COACH</Text>
-            </View>
-            {insights.slice(0, 2).map((ins) => {
-              const Icon = INSIGHT_ICONS[ins.kind] || Sparkles;
-              return (
-                <View key={ins.id} style={styles.coachRow}>
-                  <Icon size={14} color="#C9E4B5" style={{ marginTop: 2 }} />
-                  <Text style={styles.coachText}>{ins.text}</Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
+        {!pedometerAvailable && (<View style={styles.permissionBanner}><Footprints size={14} color={theme.colors.accentWarn} /><Text style={styles.permissionText}>Enable Motion and Fitness in Settings to track steps and calories burned.</Text></View>)}
+        {insights.length > 0 && (<View style={styles.coachCard}><View style={styles.coachHeader}><Sparkles size={14} color="#C9E4B5" /><Text style={styles.coachLabel}>AI COACH</Text></View>{insights.slice(0, 2).map((ins) => { const Icon = INSIGHT_ICONS[ins.kind] || Sparkles; return (<View key={ins.id} style={styles.coachRow}><Icon size={14} color="#C9E4B5" style={{ marginTop: 2 }} /><Text style={styles.coachText}>{ins.text}</Text></View>); })}</View>)}
         <View style={styles.balanceCard}>
           <ProgressRing consumed={consumed} target={target} />
           <View style={{ flex: 1, marginLeft: 16 }}>
             <Text style={styles.balanceLabel}>Net Energy Balance</Text>
-            <Text style={[styles.balanceValue, { color: net <= 0 ? theme.colors.primary : theme.colors.accentWarn }]}>
-              {net > 0 ? "+" : ""}{net} kcal
-            </Text>
-            <Text style={styles.balanceSub}>Burned {burned} − Consumed {consumed}</Text>
+            <Text style={[styles.balanceValue, { color: net <= 0 ? theme.colors.primary : theme.colors.accentWarn }]}>{net > 0 ? "+" : ""}{net} kcal</Text>
+            <Text style={styles.balanceSub}>Burned {burned} Consumed {consumed}</Text>
           </View>
         </View>
-
         <View style={styles.statsRow}>
           <StatPill icon={Flame} label="Burned" value={`${burned}`} unit="kcal" />
           <StatPill icon={Footprints} label="Steps" value={activity.steps.toLocaleString()} unit="steps" />
           <StatPill icon={MapPin} label="Distance" value={`${activity.distanceKm}`} unit="km" />
-          <StatPill icon={Droplet} label="Water" value="—" unit="L" />
+          <StatPill icon={Droplet} label="Water" value="--" unit="L" />
         </View>
-
         <Text style={styles.sectionTitle}>Macros</Text>
         <View style={styles.statsRow}>
           <MacroBar label="Protein" value={protein} goal={profile?.proteinTargetG || 90} color={theme.colors.primary} />
           <MacroBar label="Carbs" value={carbs} goal={profile?.carbsTargetG || 220} color={theme.colors.accentWarn} />
           <MacroBar label="Fat" value={fat} goal={profile?.fatTargetG || 60} color={theme.colors.accentTip} />
         </View>
-
-        <Text style={styles.sectionTitle}>Today's Meals</Text>
+        <Text style={styles.sectionTitle}>Today Meals</Text>
         {MEAL_TYPES.map((m) => {
           const items = todayItems.filter((i) => i.mealType === m);
           const mealKcal = items.reduce((s, i) => s + i.kcal, 0);
@@ -156,15 +102,11 @@ export default function HomeScreen({ navigation }) {
               <View style={styles.mealRow}>
                 <View>
                   <Text style={styles.mealName}>{MEAL_LABELS[m]}</Text>
-                  <Text style={styles.mealSub}>{items.length === 0 ? "Not logged yet" : `${items.length} item${items.length > 1 ? "s" : ""} · ${mealKcal} kcal`}</Text>
+                  <Text style={styles.mealSub}>{items.length === 0 ? "Not logged yet" : `${items.length} item${items.length > 1 ? "s" : ""} ${mealKcal} kcal`}</Text>
                 </View>
                 <View style={styles.addButton}><Plus size={16} color="#fff" /></View>
               </View>
-              {items.length > 0 && (
-                <View style={styles.emojiRow}>
-                  {items.map((it) => <Text key={it.id} style={styles.emoji}>{it.emoji}</Text>)}
-                </View>
-              )}
+              {items.length > 0 && (<View style={styles.emojiRow}>{items.map((it) => <Text key={it.id} style={styles.emoji}>{it.emoji}</Text>)}</View>)}
             </TouchableOpacity>
           );
         })}
@@ -172,42 +114,16 @@ export default function HomeScreen({ navigation }) {
     </SafeAreaView>
   );
 }
-
 function StatPill({ icon: Icon, label, value, unit }) {
-  return (
-    <View style={styles.statPill}>
-      <Icon size={15} color={theme.colors.primary} />
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statUnit}>{unit}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
+  return (<View style={styles.statPill}><Icon size={15} color={theme.colors.primary} /><Text style={styles.statValue}>{value}</Text><Text style={styles.statUnit}>{unit}</Text><Text style={styles.statLabel}>{label}</Text></View>);
 }
-
 function MacroBar({ label, value, goal, color }) {
   const pct = Math.min((value / goal) * 100, 100);
-  return (
-    <View style={styles.macroCard}>
-      <Text style={styles.macroLabel}>{label}</Text>
-      <Text style={styles.macroValue}>{Math.round(value)}g</Text>
-      <View style={styles.macroTrack}>
-        <View style={[styles.macroFill, { width: `${pct}%`, backgroundColor: color }]} />
-      </View>
-    </View>
-  );
+  return (<View style={styles.macroCard}><Text style={styles.macroLabel}>{label}</Text><Text style={styles.macroValue}>{Math.round(value)}g</Text><View style={styles.macroTrack}><View style={[styles.macroFill, { width: `${pct}%`, backgroundColor: color }]} /></View></View>);
 }
-
-function formatToday() {
-  return new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-}
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
+function formatToday() { return new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }); }
+function greeting() { const h = new Date().getHours(); if (h < 12) return "Good morning"; if (h < 18) return "Good afternoon"; return "Good evening"; }
 function firstName(name) { return name.split(" ")[0]; }
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.background },
   scrollContent: { paddingBottom: Platform.OS === "android" ? 90 : 30 },
