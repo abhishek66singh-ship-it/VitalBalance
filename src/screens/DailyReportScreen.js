@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Platform, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { Flame, Footprints, MapPin, TrendingUp, TrendingDown, Sparkles, Apple, Zap } from "lucide-react-native";
+import { Flame, Footprints, MapPin, TrendingUp, TrendingDown, Sparkles, Apple, Zap, RefreshCw } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { getDayLog } from "../services/logService";
 import { theme } from "../theme";
@@ -12,12 +12,7 @@ function getDatesArray(count = 30) {
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    dates.push({
-      key: d.toISOString().split("T")[0],
-      day: d.toLocaleDateString(undefined, { weekday: "short" }),
-      date: d.getDate(),
-      isToday: i === 0,
-    });
+    dates.push({ key: d.toISOString().split("T")[0], day: d.toLocaleDateString(undefined, { weekday: "short" }), date: d.getDate(), isToday: i === 0 });
   }
   return dates;
 }
@@ -44,8 +39,8 @@ function generateAIReport({ consumed, burned, protein, carbs, fat, steps, protei
   const proteinPct = proteinGoal > 0 ? protein / proteinGoal : 0;
   const carbsPct = carbsGoal > 0 ? carbs / carbsGoal : 0;
   const fatPct = fatGoal > 0 ? fat / fatGoal : 0;
-  if (consumed === 0) return [{ icon: "💡", text: "No food logged for this day yet." }];
-  if (net < -600) insights.push({ icon: "⚠️", text: `Calorie deficit of ${Math.abs(net)} kcal is quite high. Aim for a moderate deficit of 300–500 kcal for sustainable weight loss.` });
+  if (consumed === 0) return [{ icon: "💡", text: "No food logged for this day yet. Tap the Today tab to start logging." }];
+  if (net < -600) insights.push({ icon: "⚠️", text: `Calorie deficit of ${Math.abs(net)} kcal is quite high. Aim for a moderate deficit of 300-500 kcal for sustainable weight loss.` });
   else if (net > 500) insights.push({ icon: "📈", text: `Calorie surplus of ${net} kcal. If you are not in a muscle-building phase, consider reducing portion sizes slightly.` });
   else if (net <= 0) insights.push({ icon: "✅", text: `Great job — you maintained a healthy calorie balance today with a deficit of ${Math.abs(net)} kcal.` });
   else insights.push({ icon: "✅", text: "You stayed close to your maintenance calories today." });
@@ -53,7 +48,7 @@ function generateAIReport({ consumed, burned, protein, carbs, fat, steps, protei
   else if (proteinPct >= 1) insights.push({ icon: "💪", text: `Protein goal met! At ${Math.round(protein)}g, you are supporting muscle repair and satiety well.` });
   if (carbsPct > 1.2) insights.push({ icon: "🍚", text: `Carbohydrate intake is ${Math.round(carbsPct * 100)}% of your goal. Consider replacing some refined carbs with vegetables or protein.` });
   if (fatPct > 1.3) insights.push({ icon: "🛢️", text: `Fat intake is higher than recommended. Try reducing fried foods or ghee to bring it closer to ${Math.round(fatGoal)}g.` });
-  if (steps < 5000) insights.push({ icon: "🚶", text: `Only ${steps.toLocaleString()} steps today. A short 20-minute walk can help burn an extra 80–100 kcal and improve metabolism.` });
+  if (steps < 5000) insights.push({ icon: "🚶", text: `Only ${steps.toLocaleString()} steps today. A short 20-minute walk can help burn an extra 80-100 kcal and improve metabolism.` });
   else if (steps >= 10000) insights.push({ icon: "🏃", text: `Excellent — ${steps.toLocaleString()} steps today. You have hit the recommended daily step count.` });
   return insights;
 }
@@ -65,6 +60,7 @@ export default function DailyReportScreen() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [log, setLog] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -76,6 +72,8 @@ export default function DailyReportScreen() {
   }, [user, selectedDate]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
 
   const items = log?.items || [];
   const consumed = items.reduce((s, i) => s + i.kcal, 0);
@@ -95,8 +93,13 @@ export default function DailyReportScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Daily Report</Text>
-        <Text style={styles.subtitle}>Scroll to select a date</Text>
+        <View>
+          <Text style={styles.title}>Daily Report</Text>
+          <Text style={styles.subtitle}>Select a date to see your summary</Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn} hitSlop={10}>
+          <RefreshCw size={18} color={theme.colors.primary} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -109,7 +112,7 @@ export default function DailyReportScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, gap: 6, paddingVertical: 8 }}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.dateChip, selectedDate === item.key && styles.dateChipActive, item.isToday && !selectedDate === item.key && styles.dateChipToday]}
+            style={[styles.dateChip, selectedDate === item.key && styles.dateChipActive]}
             onPress={() => setSelectedDate(item.key)}
           >
             <Text style={[styles.dateDay, selectedDate === item.key && styles.dateDayActive]}>{item.day}</Text>
@@ -122,7 +125,10 @@ export default function DailyReportScreen() {
       {loading ? (
         <View style={styles.loadingWrap}><ActivityIndicator color={theme.colors.primary} /></View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: Platform.OS === "android" ? 90 : 30 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: Platform.OS === "android" ? 90 : 30 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
+        >
           <View style={styles.heroCard}>
             <View style={styles.heroRow}>
               <View style={styles.heroItem}>
@@ -178,10 +184,10 @@ export default function DailyReportScreen() {
 
           {items.length > 0 && (
             <>
-              <Text style={styles.sectionTitle}>Food Logged</Text>
+              <Text style={styles.sectionTitle}>Food Logged ({items.length} items)</Text>
               <View style={styles.foodLogCard}>
                 {items.map((item, i) => (
-                  <View key={item.id} style={[styles.foodLogRow, i < items.length - 1 && styles.foodLogDivider]}>
+                  <View key={item.id || i} style={[styles.foodLogRow, i < items.length - 1 && styles.foodLogDivider]}>
                     <Text style={styles.foodEmoji}>{item.emoji}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.foodName}>{item.name}{item.variant ? ` (${item.variant})` : ""}</Text>
@@ -215,13 +221,13 @@ export default function DailyReportScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 8 },
+  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   title: { fontSize: 22, fontWeight: "700", color: theme.colors.text, fontFamily: theme.fonts.display },
-  subtitle: { fontSize: 12, color: theme.colors.textMuted, marginTop: 2 },
+  subtitle: { fontSize: 12.5, color: theme.colors.textMuted, marginTop: 2 },
+  refreshBtn: { padding: 8, marginTop: 4 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   dateChip: { width: 52, alignItems: "center", paddingVertical: 8, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border },
   dateChipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  dateChipToday: { borderColor: theme.colors.primary },
   dateDay: { fontSize: 10, color: theme.colors.textMuted, fontWeight: "600" },
   dateDayActive: { color: "#fff" },
   dateNum: { fontSize: 16, fontWeight: "700", color: theme.colors.text, marginTop: 2 },
