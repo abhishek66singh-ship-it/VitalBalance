@@ -1,266 +1,164 @@
-// Food database. Each food has calorie/macro data per 100g (or per 100ml for
-// liquids), plus preset "tiles" for quick logging (variants + portions) as
-// specified in the PRD (FR-2.1 - FR-2.4), and search-friendly metadata for
-// items that aren't in a meal's curated tile set (FR-2.5).
-//
-// This file ships in the app bundle for V1 (fast, offline, zero cost). Mid-term
-// this should move to Firestore (collection: `foods`) so it can be updated
-// without an app release — see src/services/foodService.js for the swap point.
-
 export const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"];
-
-export const MEAL_LABELS = {
-  breakfast: "Breakfast",
-  lunch: "Lunch",
-  dinner: "Dinner",
-  snack: "Snack",
-};
-
-// kcalPer100 / proteinPer100 / carbsPer100 / fatPer100 are per 100g (solids)
-// or per 100ml (liquids like tea, milk).
-//
-// unitGrams + unitLabel: the gram weight of "1" discrete unit (e.g. 1 chapati =
-// 40g, 1 egg = 50g) and what to call that unit. Used by the quantity stepper so
-// users can log ANY number of pieces (e.g. 7 chapatis), not just preset chip
-// values. Foods without unitGrams are logged directly in grams via the stepper.
-//
-// tiles: true => shown as a quick-tap tile for the listed mealTypes.
-// tiles: false (or omitted mealTypes) => search-only, not cluttering the grid,
-// but fully loggable via the search bar (FR-2.5) — e.g. occasional items like
-// samosa, pizza, burger.
+export const MEAL_LABELS = { breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack" };
 export const FOOD_LIBRARY = [
-  // ---- Breakfast staples (tiles) ----
-  {
-    id: "tea", name: "Tea", emoji: "\u2615", mealTypes: ["breakfast", "snack"], tiles: true,
-    variants: ["Without Sugar", "With Sugar"],
-    unitGrams: 150, unitLabel: "Cup",
-    kcalPer100: 20, proteinPer100: 0.3, carbsPer100: 3, fatPer100: 0.7,
-  },
-  {
-    id: "coffee", name: "Coffee", emoji: "\u2615", mealTypes: ["breakfast", "snack"], tiles: true,
-    variants: ["Black", "With Milk"],
-    unitGrams: 150, unitLabel: "Cup",
-    kcalPer100: 15, proteinPer100: 0.4, carbsPer100: 2, fatPer100: 0.5,
-  },
-  {
-    id: "milk", name: "Milk", emoji: "\ud83e\udd5b", mealTypes: ["breakfast"], tiles: true,
-    variants: null,
-    unitGrams: 200, unitLabel: "Cup",
-    kcalPer100: 61, proteinPer100: 3.2, carbsPer100: 4.8, fatPer100: 3.3,
-  },
-  {
-    id: "egg", name: "Egg", emoji: "\ud83e\udd5a", mealTypes: ["breakfast", "snack"], tiles: true,
-    variants: ["Boiled", "Fried", "Scrambled"],
-    unitGrams: 50, unitLabel: "Egg",
-    kcalPer100: 155, proteinPer100: 13, carbsPer100: 1.1, fatPer100: 11,
-  },
-  {
-    id: "bread", name: "Bread", emoji: "\ud83c\udf5e", mealTypes: ["breakfast", "snack"], tiles: true,
-    variants: null,
-    unitGrams: 30, unitLabel: "Slice",
-    kcalPer100: 265, proteinPer100: 9, carbsPer100: 49, fatPer100: 3.2,
-  },
-  {
-    id: "oats", name: "Oats", emoji: "\ud83c\udf63", mealTypes: ["breakfast"], tiles: true,
-    variants: null,
-    unitGrams: 150, unitLabel: "Bowl",
-    kcalPer100: 68, proteinPer100: 2.4, carbsPer100: 12, fatPer100: 1.4,
-  },
-  {
-    id: "banana", name: "Banana", emoji: "\ud83c\udf4c", mealTypes: ["breakfast", "snack"], tiles: true,
-    variants: null,
-    unitGrams: 120, unitLabel: "Banana",
-    kcalPer100: 89, proteinPer100: 1.1, carbsPer100: 23, fatPer100: 0.3,
-  },
-
-  // ---- Lunch / dinner staples (tiles) ----
-  {
-    id: "chapati", name: "Chapati", emoji: "\ud83e\udef3", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: 40, unitLabel: "Chapati",
-    kcalPer100: 297, proteinPer100: 11, carbsPer100: 46, fatPer100: 7.4,
-  },
-  {
-    id: "rice", name: "Rice", emoji: "\ud83c\udf5a", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: null, unitLabel: null, // gram-based, no discrete unit
-    kcalPer100: 130, proteinPer100: 2.7, carbsPer100: 28, fatPer100: 0.3,
-  },
-  {
-    id: "dal", name: "Dal", emoji: "\ud83c\udf72", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: 150, unitLabel: "Bowl",
-    kcalPer100: 120, proteinPer100: 9, carbsPer100: 18, fatPer100: 1.5,
-  },
-  {
-    id: "paneer", name: "Paneer", emoji: "\ud83e\uddc0", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: null, unitLabel: null,
-    kcalPer100: 265, proteinPer100: 18, carbsPer100: 1.2, fatPer100: 21,
-  },
-  {
-    id: "sabzi", name: "Sabzi", emoji: "\ud83e\udd57", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: 150, unitLabel: "Bowl",
-    kcalPer100: 95, proteinPer100: 2.5, carbsPer100: 12, fatPer100: 4,
-  },
-  {
-    id: "curd", name: "Curd", emoji: "\ud83e\udd5b", mealTypes: ["lunch", "dinner", "snack"], tiles: true,
-    variants: null,
-    unitGrams: 150, unitLabel: "Bowl",
-    kcalPer100: 60, proteinPer100: 3.5, carbsPer100: 4.7, fatPer100: 3.3,
-  },
-  {
-    id: "salad", name: "Salad", emoji: "\ud83e\udd57", mealTypes: ["lunch", "dinner"], tiles: true,
-    variants: null,
-    unitGrams: 100, unitLabel: "Bowl",
-    kcalPer100: 25, proteinPer100: 1.5, carbsPer100: 4, fatPer100: 0.2,
-  },
-
-  // ---- Search-only items (FR-2.5): not cluttering the tile grid, but fully
-  // loggable via search for occasional/restaurant/snack foods ----
-  {
-    id: "samosa", name: "Samosa", emoji: "\ud83e\udd5f", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 60, unitLabel: "Samosa",
-    kcalPer100: 308, proteinPer100: 5.5, carbsPer100: 30, fatPer100: 18,
-    searchTokens: ["samosa", "snack", "fried", "punjabi samosa"],
-  },
-  {
-    id: "pizza", name: "Pizza", emoji: "\ud83c\udf55", mealTypes: [], tiles: false,
-    variants: ["Veg", "Cheese", "Pepperoni"],
-    unitGrams: 110, unitLabel: "Slice",
-    kcalPer100: 266, proteinPer100: 11, carbsPer100: 33, fatPer100: 10,
-    searchTokens: ["pizza", "slice", "fast food", "italian"],
-  },
-  {
-    id: "burger", name: "Burger", emoji: "\ud83c\udf54", mealTypes: [], tiles: false,
-    variants: ["Veg", "Chicken", "Cheese"],
-    unitGrams: 220, unitLabel: "Burger",
-    kcalPer100: 250, proteinPer100: 12, carbsPer100: 28, fatPer100: 10,
-    searchTokens: ["burger", "fast food", "sandwich"],
-  },
-  {
-    id: "poha", name: "Poha", emoji: "\ud83c\udf5a", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 200, unitLabel: "Plate",
-    kcalPer100: 130, proteinPer100: 2.6, carbsPer100: 25, fatPer100: 2.5,
-    searchTokens: ["poha", "flattened rice", "breakfast", "maharashtrian"],
-  },
-  {
-    id: "idli", name: "Idli", emoji: "\u26aa", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 40, unitLabel: "Idli",
-    kcalPer100: 132, proteinPer100: 4, carbsPer100: 28, fatPer100: 0.5,
-    searchTokens: ["idli", "south indian", "steamed", "breakfast"],
-  },
-  {
-    id: "dosa", name: "Dosa", emoji: "\ud83e\udf2f", mealTypes: [], tiles: false,
-    variants: ["Plain", "Masala"],
-    unitGrams: 130, unitLabel: "Dosa",
-    kcalPer100: 168, proteinPer100: 3.9, carbsPer100: 29, fatPer100: 3.7,
-    searchTokens: ["dosa", "south indian", "crepe", "breakfast"],
-  },
-  {
-    id: "noodles", name: "Noodles", emoji: "\ud83c\udf5c", mealTypes: [], tiles: false,
-    variants: ["Veg", "Chicken"],
-    unitGrams: 200, unitLabel: "Plate",
-    kcalPer100: 138, proteinPer100: 4.5, carbsPer100: 25, fatPer100: 2.5,
-    searchTokens: ["noodles", "chowmein", "chinese", "hakka"],
-  },
-  {
-    id: "frenchfries", name: "French Fries", emoji: "\ud83c\udf5f", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 100, unitLabel: "Serving",
-    kcalPer100: 312, proteinPer100: 3.4, carbsPer100: 41, fatPer100: 15,
-    searchTokens: ["fries", "french fries", "potato", "fast food"],
-  },
-  {
-    id: "icecream", name: "Ice Cream", emoji: "\ud83c\udf66", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 100, unitLabel: "Scoop",
-    kcalPer100: 207, proteinPer100: 3.5, carbsPer100: 24, fatPer100: 11,
-    searchTokens: ["ice cream", "dessert", "sweet"],
-  },
-  {
-    id: "chocolate", name: "Chocolate", emoji: "\ud83c\udf6b", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 20, unitLabel: "Piece",
-    kcalPer100: 546, proteinPer100: 4.9, carbsPer100: 61, fatPer100: 31,
-    searchTokens: ["chocolate", "dessert", "sweet", "candy"],
-  },
-  {
-    id: "biryani", name: "Biryani", emoji: "\ud83c\udf5b", mealTypes: [], tiles: false,
-    variants: ["Veg", "Chicken", "Mutton"],
-    unitGrams: 250, unitLabel: "Plate",
-    kcalPer100: 165, proteinPer100: 6.5, carbsPer100: 22, fatPer100: 5.5,
-    searchTokens: ["biryani", "rice dish", "hyderabadi"],
-  },
-  {
-    id: "chai_biscuit", name: "Biscuit", emoji: "\ud83c\udf6a", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 10, unitLabel: "Biscuit",
-    kcalPer100: 450, proteinPer100: 6.5, carbsPer100: 70, fatPer100: 16,
-    searchTokens: ["biscuit", "cookie", "snack", "tea time"],
-  },
-  {
-    id: "apple", name: "Apple", emoji: "\ud83c\udf4e", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 150, unitLabel: "Apple",
-    kcalPer100: 52, proteinPer100: 0.3, carbsPer100: 14, fatPer100: 0.2,
-    searchTokens: ["apple", "fruit"],
-  },
-  {
-    id: "almonds", name: "Almonds", emoji: "\ud83e\udd5c", mealTypes: [], tiles: false,
-    variants: null,
-    unitGrams: 1, unitLabel: "g",
-    kcalPer100: 579, proteinPer100: 21, carbsPer100: 22, fatPer100: 50,
-    searchTokens: ["almonds", "nuts", "badam", "dry fruit"],
-  },
-  {
-    id: "paratha", name: "Paratha", emoji: "\ud83e\udef3", mealTypes: [], tiles: false,
-    variants: ["Plain", "Aloo", "Gobi"],
-    unitGrams: 80, unitLabel: "Paratha",
-    kcalPer100: 320, proteinPer100: 6.5, carbsPer100: 40, fatPer100: 15,
-    searchTokens: ["paratha", "stuffed bread", "breakfast"],
-  },
-  {
-    id: "momo", name: "Momos", emoji: "\ud83e\udd5f", mealTypes: [], tiles: false,
-    variants: ["Veg", "Chicken"],
-    unitGrams: 25, unitLabel: "Piece",
-    kcalPer100: 180, proteinPer100: 6, carbsPer100: 22, fatPer100: 6,
-    searchTokens: ["momo", "momos", "dumpling", "tibetan"],
-  },
+  { id: "tea", name: "Tea", emoji: "☕", mealTypes: ["breakfast","snack"], tiles: true, variants: ["Without Sugar","With Sugar"], unitGrams: 150, unitLabel: "Cup", kcalPer100: 20, proteinPer100: 0.3, carbsPer100: 3, fatPer100: 0.7 },
+  { id: "coffee", name: "Coffee", emoji: "☕", mealTypes: ["breakfast","snack"], tiles: true, variants: ["Black","With Milk"], unitGrams: 150, unitLabel: "Cup", kcalPer100: 15, proteinPer100: 0.4, carbsPer100: 2, fatPer100: 0.5 },
+  { id: "milk", name: "Milk", emoji: "🥛", mealTypes: ["breakfast"], tiles: true, variants: null, unitGrams: 200, unitLabel: "Cup", kcalPer100: 61, proteinPer100: 3.2, carbsPer100: 4.8, fatPer100: 3.3 },
+  { id: "egg", name: "Egg", emoji: "🥚", mealTypes: ["breakfast","snack"], tiles: true, variants: ["Boiled","Fried","Scrambled"], unitGrams: 50, unitLabel: "Egg", kcalPer100: 155, proteinPer100: 13, carbsPer100: 1.1, fatPer100: 11 },
+  { id: "bread", name: "Bread", emoji: "🍞", mealTypes: ["breakfast","snack"], tiles: true, variants: null, unitGrams: 30, unitLabel: "Slice", kcalPer100: 265, proteinPer100: 9, carbsPer100: 49, fatPer100: 3.2 },
+  { id: "oats", name: "Oats", emoji: "🥣", mealTypes: ["breakfast"], tiles: true, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 68, proteinPer100: 2.4, carbsPer100: 12, fatPer100: 1.4 },
+  { id: "banana", name: "Banana", emoji: "🍌", mealTypes: ["breakfast","snack"], tiles: true, variants: null, unitGrams: 120, unitLabel: "Banana", kcalPer100: 89, proteinPer100: 1.1, carbsPer100: 23, fatPer100: 0.3 },
+  { id: "chapati", name: "Chapati", emoji: "🫓", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: 40, unitLabel: "Chapati", kcalPer100: 297, proteinPer100: 11, carbsPer100: 46, fatPer100: 7.4 },
+  { id: "rice", name: "Rice", emoji: "🍚", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 130, proteinPer100: 2.7, carbsPer100: 28, fatPer100: 0.3 },
+  { id: "dal", name: "Dal", emoji: "🍲", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 120, proteinPer100: 9, carbsPer100: 18, fatPer100: 1.5 },
+  { id: "paneer", name: "Paneer", emoji: "🧀", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 265, proteinPer100: 18, carbsPer100: 1.2, fatPer100: 21 },
+  { id: "sabzi", name: "Sabzi", emoji: "🥗", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 95, proteinPer100: 2.5, carbsPer100: 12, fatPer100: 4 },
+  { id: "curd", name: "Curd", emoji: "🥛", mealTypes: ["lunch","dinner","snack"], tiles: true, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 60, proteinPer100: 3.5, carbsPer100: 4.7, fatPer100: 3.3 },
+  { id: "salad", name: "Salad", emoji: "🥗", mealTypes: ["lunch","dinner"], tiles: true, variants: null, unitGrams: 100, unitLabel: "Bowl", kcalPer100: 25, proteinPer100: 1.5, carbsPer100: 4, fatPer100: 0.2 },
+  { id: "white_rice", name: "Cooked White Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 130, proteinPer100: 2.7, carbsPer100: 28, fatPer100: 0.3, searchTokens: ["white rice","cooked rice","plain rice"] },
+  { id: "brown_rice", name: "Cooked Brown Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 111, proteinPer100: 2.6, carbsPer100: 23, fatPer100: 0.9, searchTokens: ["brown rice","wholegrain rice"] },
+  { id: "basmati_rice", name: "Cooked Basmati Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 121, proteinPer100: 3.5, carbsPer100: 25, fatPer100: 0.4, searchTokens: ["basmati","basmati rice"] },
+  { id: "jasmine_rice", name: "Cooked Jasmine Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 129, proteinPer100: 2.7, carbsPer100: 28, fatPer100: 0.3, searchTokens: ["jasmine rice"] },
+  { id: "murmura", name: "Puffed Rice (Murmura)", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 402, proteinPer100: 6.3, carbsPer100: 89, fatPer100: 0.5, searchTokens: ["murmura","puffed rice","bhel"] },
+  { id: "poha_cooked", name: "Poha (Flattened Rice), Cooked", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 130, proteinPer100: 2.6, carbsPer100: 25, fatPer100: 2.5, searchTokens: ["poha","flattened rice","kanda poha","indori poha","vegetable poha"] },
+  { id: "jeera_rice", name: "Jeera Rice, Cooked", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 145, proteinPer100: 3, carbsPer100: 28, fatPer100: 3, searchTokens: ["jeera rice","cumin rice"] },
+  { id: "veg_pulao", name: "Vegetable Pulao", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 150, proteinPer100: 3.5, carbsPer100: 28, fatPer100: 3.5, searchTokens: ["pulao","vegetable pulao","veg pulao"] },
+  { id: "veg_biryani", name: "Vegetable Biryani", emoji: "🍛", mealTypes: [], tiles: false, variants: null, unitGrams: 250, unitLabel: "Plate", kcalPer100: 155, proteinPer100: 4, carbsPer100: 28, fatPer100: 4, searchTokens: ["veg biryani","vegetable biryani"] },
+  { id: "chicken_biryani", name: "Chicken Biryani", emoji: "🍛", mealTypes: [], tiles: false, variants: null, unitGrams: 250, unitLabel: "Plate", kcalPer100: 165, proteinPer100: 9, carbsPer100: 22, fatPer100: 5, searchTokens: ["chicken biryani","biryani"] },
+  { id: "curd_rice", name: "Curd Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 110, proteinPer100: 3.5, carbsPer100: 20, fatPer100: 2, searchTokens: ["curd rice","thayir sadam"] },
+  { id: "lemon_rice", name: "Lemon Rice", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 140, proteinPer100: 2.5, carbsPer100: 28, fatPer100: 3, searchTokens: ["lemon rice","chitranna"] },
+  { id: "khichdi", name: "Khichdi (Moong Dal & Rice)", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 125, proteinPer100: 5, carbsPer100: 22, fatPer100: 2, searchTokens: ["khichdi","khichri","moong dal khichdi"] },
+  { id: "sabudana_khichdi", name: "Sabudana Khichdi", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 200, proteinPer100: 2, carbsPer100: 38, fatPer100: 5, searchTokens: ["sabudana khichdi","sago khichdi","sabudana"] },
+  { id: "oats_porridge", name: "Oats Porridge, Cooked in Milk", emoji: "🥣", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 85, proteinPer100: 4, carbsPer100: 13, fatPer100: 2, searchTokens: ["oats porridge","oatmeal","oats cooked"] },
+  { id: "dalia_upma", name: "Dalia Upma, Cooked", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 110, proteinPer100: 3.5, carbsPer100: 20, fatPer100: 2, searchTokens: ["dalia upma","broken wheat upma","dalia"] },
+  { id: "ragi_roti", name: "Ragi Roti", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 260, proteinPer100: 7, carbsPer100: 55, fatPer100: 2, searchTokens: ["ragi roti","finger millet roti","nachni roti","ragi"] },
+  { id: "roti_wheat", name: "Roti, Whole Wheat", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 297, proteinPer100: 11, carbsPer100: 46, fatPer100: 7.4, searchTokens: ["roti","phulka","fulka","whole wheat roti"] },
+  { id: "chapati_ghee", name: "Chapati with Ghee", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 45, unitLabel: "Chapati", kcalPer100: 330, proteinPer100: 9, carbsPer100: 44, fatPer100: 12, searchTokens: ["chapati ghee","roti ghee"] },
+  { id: "jowar_roti", name: "Jowar Roti", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 280, proteinPer100: 8, carbsPer100: 58, fatPer100: 2, searchTokens: ["jowar roti","sorghum roti","jowar"] },
+  { id: "bajra_roti", name: "Bajra Roti", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 275, proteinPer100: 7, carbsPer100: 55, fatPer100: 4, searchTokens: ["bajra roti","pearl millet roti","bajra"] },
+  { id: "plain_paratha", name: "Plain Paratha", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 80, unitLabel: "Paratha", kcalPer100: 300, proteinPer100: 7, carbsPer100: 42, fatPer100: 12, searchTokens: ["plain paratha","paratha"] },
+  { id: "aloo_paratha", name: "Aloo Paratha", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 120, unitLabel: "Paratha", kcalPer100: 280, proteinPer100: 6, carbsPer100: 40, fatPer100: 10, searchTokens: ["aloo paratha","potato paratha","stuffed paratha"] },
+  { id: "methi_roti", name: "Methi Roti", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 290, proteinPer100: 9, carbsPer100: 44, fatPer100: 8, searchTokens: ["methi roti","fenugreek roti"] },
+  { id: "makki_roti", name: "Makki Roti", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Roti", kcalPer100: 270, proteinPer100: 7, carbsPer100: 54, fatPer100: 3, searchTokens: ["makki roti","corn roti","maize roti"] },
+  { id: "naan", name: "Naan, Plain", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 90, unitLabel: "Naan", kcalPer100: 310, proteinPer100: 9, carbsPer100: 55, fatPer100: 6, searchTokens: ["naan","butter naan","tandoori roti"] },
+  { id: "puri", name: "Puri, Plain", emoji: "🫓", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Puri", kcalPer100: 420, proteinPer100: 7, carbsPer100: 50, fatPer100: 20, searchTokens: ["puri","poori"] },
+  { id: "bread_white", name: "Bread, White", emoji: "🍞", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Slice", kcalPer100: 265, proteinPer100: 9, carbsPer100: 49, fatPer100: 3.2, searchTokens: ["white bread","bread slice"] },
+  { id: "bread_brown", name: "Bread, Brown", emoji: "🍞", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Slice", kcalPer100: 245, proteinPer100: 10, carbsPer100: 44, fatPer100: 3, searchTokens: ["brown bread","whole wheat bread"] },
+  { id: "plain_dal", name: "Plain Dal, Cooked", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 120, proteinPer100: 9, carbsPer100: 18, fatPer100: 1.5, searchTokens: ["plain dal","lentil soup","moong dal","toor dal"] },
+  { id: "sambar", name: "Sambar", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 45, proteinPer100: 2.5, carbsPer100: 7, fatPer100: 1, searchTokens: ["sambar","sambhar","south indian","radish sambar"] },
+  { id: "rajma", name: "Rajma Curry", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 115, proteinPer100: 7, carbsPer100: 18, fatPer100: 2, searchTokens: ["rajma","kidney beans","rajma chawal"] },
+  { id: "dal_makhani", name: "Dal Makhani", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 140, proteinPer100: 7, carbsPer100: 16, fatPer100: 5, searchTokens: ["dal makhani","black dal","makhani"] },
+  { id: "chana_masala", name: "Chana Masala", emoji: "🍲", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 130, proteinPer100: 7, carbsPer100: 20, fatPer100: 3, searchTokens: ["chana masala","chole","chickpea curry"] },
+  { id: "cucumber", name: "Cucumber, Raw", emoji: "🥒", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 15, proteinPer100: 0.7, carbsPer100: 3.6, fatPer100: 0.1, searchTokens: ["cucumber","kheera"] },
+  { id: "carrot", name: "Carrot, Raw", emoji: "🥕", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 41, proteinPer100: 0.9, carbsPer100: 10, fatPer100: 0.2, searchTokens: ["carrot","gajar"] },
+  { id: "tomato", name: "Tomato, Raw", emoji: "🍅", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 18, proteinPer100: 0.9, carbsPer100: 3.9, fatPer100: 0.2, searchTokens: ["tomato","tamatar"] },
+  { id: "baingan_bharta", name: "Baingan Bharta", emoji: "🍆", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 85, proteinPer100: 2, carbsPer100: 10, fatPer100: 4, searchTokens: ["baingan bharta","eggplant","brinjal","baingan"] },
+  { id: "aloo_gobi", name: "Aloo Gobi, Cooked", emoji: "🥔", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 95, proteinPer100: 2.5, carbsPer100: 14, fatPer100: 3, searchTokens: ["aloo gobi","potato cauliflower"] },
+  { id: "bhindi", name: "Bhindi Do Pyaza", emoji: "🥗", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 90, proteinPer100: 2, carbsPer100: 10, fatPer100: 4, searchTokens: ["bhindi","okra","lady finger"] },
+  { id: "lauki", name: "Lauki Sabzi", emoji: "🥗", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 65, proteinPer100: 1.5, carbsPer100: 10, fatPer100: 2, searchTokens: ["lauki","bottle gourd","ghiya","lauki sabzi"] },
+  { id: "methi_aloo", name: "Methi Aloo, Cooked", emoji: "🥗", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 100, proteinPer100: 2.5, carbsPer100: 14, fatPer100: 4, searchTokens: ["methi aloo","fenugreek potato"] },
+  { id: "potato_bhaji", name: "Potato Bhaji", emoji: "🥔", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 110, proteinPer100: 2, carbsPer100: 18, fatPer100: 3, searchTokens: ["potato bhaji","aloo bhaji","batata bhaji"] },
+  { id: "mixed_veg", name: "Mixed Vegetable Sabzi", emoji: "🥗", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 90, proteinPer100: 2.5, carbsPer100: 12, fatPer100: 3.5, searchTokens: ["mixed vegetable","mix veg","mixed sabzi"] },
+  { id: "apple", name: "Apple", emoji: "🍎", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Apple", kcalPer100: 52, proteinPer100: 0.3, carbsPer100: 14, fatPer100: 0.2, searchTokens: ["apple","seb"] },
+  { id: "orange", name: "Orange", emoji: "🍊", mealTypes: [], tiles: false, variants: null, unitGrams: 130, unitLabel: "Orange", kcalPer100: 47, proteinPer100: 0.9, carbsPer100: 12, fatPer100: 0.1, searchTokens: ["orange","santra","narangi"] },
+  { id: "mango", name: "Mango", emoji: "🥭", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Serving", kcalPer100: 60, proteinPer100: 0.8, carbsPer100: 15, fatPer100: 0.4, searchTokens: ["mango","aam"] },
+  { id: "papaya", name: "Papaya", emoji: "🍈", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Serving", kcalPer100: 43, proteinPer100: 0.5, carbsPer100: 11, fatPer100: 0.3, searchTokens: ["papaya","papita"] },
+  { id: "guava", name: "Guava", emoji: "🍈", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Guava", kcalPer100: 68, proteinPer100: 2.6, carbsPer100: 14, fatPer100: 1, searchTokens: ["guava","amrood"] },
+  { id: "watermelon", name: "Watermelon", emoji: "🍉", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Serving", kcalPer100: 30, proteinPer100: 0.6, carbsPer100: 8, fatPer100: 0.2, searchTokens: ["watermelon","tarbooz"] },
+  { id: "grapes", name: "Grapes", emoji: "🍇", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 67, proteinPer100: 0.6, carbsPer100: 17, fatPer100: 0.4, searchTokens: ["grapes","angoor"] },
+  { id: "pomegranate", name: "Pomegranate", emoji: "🍎", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 83, proteinPer100: 1.7, carbsPer100: 19, fatPer100: 1.2, searchTokens: ["pomegranate","anar"] },
+  { id: "strawberry", name: "Strawberry", emoji: "🍓", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 32, proteinPer100: 0.7, carbsPer100: 8, fatPer100: 0.3, searchTokens: ["strawberry"] },
+  { id: "pineapple", name: "Pineapple", emoji: "🍍", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 50, proteinPer100: 0.5, carbsPer100: 13, fatPer100: 0.1, searchTokens: ["pineapple","ananas"] },
+  { id: "kiwi", name: "Kiwi", emoji: "🥝", mealTypes: [], tiles: false, variants: null, unitGrams: 80, unitLabel: "Kiwi", kcalPer100: 61, proteinPer100: 1.1, carbsPer100: 15, fatPer100: 0.5, searchTokens: ["kiwi","sungold kiwi"] },
+  { id: "pear", name: "Pear", emoji: "🍐", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Pear", kcalPer100: 57, proteinPer100: 0.4, carbsPer100: 15, fatPer100: 0.1, searchTokens: ["pear","nashpati"] },
+  { id: "amla", name: "Amla (Indian Gooseberry)", emoji: "🍈", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 44, proteinPer100: 0.9, carbsPer100: 10, fatPer100: 0.6, searchTokens: ["amla","gooseberry","indian gooseberry"] },
+  { id: "jackfruit", name: "Jackfruit, Ripe", emoji: "🍈", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 95, proteinPer100: 1.7, carbsPer100: 24, fatPer100: 0.6, searchTokens: ["jackfruit","kathal"] },
+  { id: "litchi", name: "Litchi", emoji: "🍇", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 66, proteinPer100: 0.8, carbsPer100: 17, fatPer100: 0.4, searchTokens: ["litchi","lychee"] },
+  { id: "dates", name: "Dates, Dry", emoji: "🌴", mealTypes: [], tiles: false, variants: null, unitGrams: 8, unitLabel: "Date", kcalPer100: 282, proteinPer100: 2.5, carbsPer100: 75, fatPer100: 0.4, searchTokens: ["dates","khajoor","dry dates"] },
+  { id: "almonds", name: "Almonds", emoji: "🌰", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 579, proteinPer100: 21, carbsPer100: 22, fatPer100: 50, searchTokens: ["almonds","badam"] },
+  { id: "cashew", name: "Cashew", emoji: "🌰", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 553, proteinPer100: 18, carbsPer100: 30, fatPer100: 44, searchTokens: ["cashew","kaju"] },
+  { id: "peanuts", name: "Peanuts", emoji: "🥜", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 567, proteinPer100: 26, carbsPer100: 16, fatPer100: 49, searchTokens: ["peanuts","moongfali","groundnut"] },
+  { id: "walnut", name: "Walnut", emoji: "🌰", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 654, proteinPer100: 15, carbsPer100: 14, fatPer100: 65, searchTokens: ["walnut","akhrot"] },
+  { id: "pistachio", name: "Pistachio Nuts", emoji: "🌰", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 562, proteinPer100: 20, carbsPer100: 28, fatPer100: 45, searchTokens: ["pistachio","pista"] },
+  { id: "coconut_dry", name: "Coconut, Dry", emoji: "🥥", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 660, proteinPer100: 7, carbsPer100: 24, fatPer100: 65, searchTokens: ["coconut dry","dried coconut","nariyal"] },
+  { id: "raisins", name: "Raisins, Black", emoji: "🍇", mealTypes: [], tiles: false, variants: null, unitGrams: 1, unitLabel: "g", kcalPer100: 299, proteinPer100: 3.1, carbsPer100: 79, fatPer100: 0.5, searchTokens: ["raisins","kishmish","black raisins"] },
+  { id: "buttermilk", name: "Buttermilk", emoji: "🥛", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Glass", kcalPer100: 40, proteinPer100: 3.3, carbsPer100: 4.8, fatPer100: 0.9, searchTokens: ["buttermilk","chaas","lassi"] },
+  { id: "yogurt", name: "Yogurt, Plain Low Fat", emoji: "🥛", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 56, proteinPer100: 4, carbsPer100: 6.6, fatPer100: 1.5, searchTokens: ["yogurt","dahi","curd low fat"] },
+  { id: "lassi", name: "Lassi (with Sugar)", emoji: "🥛", mealTypes: [], tiles: false, variants: null, unitGrams: 250, unitLabel: "Glass", kcalPer100: 80, proteinPer100: 3.5, carbsPer100: 12, fatPer100: 2, searchTokens: ["lassi","sweet lassi"] },
+  { id: "tofu", name: "Tofu", emoji: "🧀", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 76, proteinPer100: 8, carbsPer100: 2, fatPer100: 4.5, searchTokens: ["tofu","soy paneer"] },
+  { id: "paneer_curry", name: "Paneer Curry", emoji: "🧀", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 200, proteinPer100: 10, carbsPer100: 8, fatPer100: 15, searchTokens: ["paneer curry","paneer masala"] },
+  { id: "paneer_tikka", name: "Paneer Tikka", emoji: "🧀", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Serving", kcalPer100: 215, proteinPer100: 14, carbsPer100: 6, fatPer100: 15, searchTokens: ["paneer tikka"] },
+  { id: "paneer_bhurji", name: "Paneer Bhurji", emoji: "🧀", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Serving", kcalPer100: 230, proteinPer100: 13, carbsPer100: 5, fatPer100: 18, searchTokens: ["paneer bhurji"] },
+  { id: "boiled_egg", name: "Boiled Egg", emoji: "🥚", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Egg", kcalPer100: 155, proteinPer100: 13, carbsPer100: 1.1, fatPer100: 11, searchTokens: ["boiled egg","hard boiled egg"] },
+  { id: "omelette", name: "Omelette", emoji: "🍳", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Omelette", kcalPer100: 154, proteinPer100: 10, carbsPer100: 1, fatPer100: 12, searchTokens: ["omelette","omelet"] },
+  { id: "fried_egg", name: "Fried Egg", emoji: "🍳", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Egg", kcalPer100: 196, proteinPer100: 14, carbsPer100: 0.4, fatPer100: 15, searchTokens: ["fried egg","sunny side up"] },
+  { id: "chicken_curry", name: "Chicken Curry", emoji: "🍗", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 150, proteinPer100: 14, carbsPer100: 4, fatPer100: 9, searchTokens: ["chicken curry","murgh"] },
+  { id: "chicken_breast", name: "Chicken Breast, Grilled", emoji: "🍗", mealTypes: [], tiles: false, variants: null, unitGrams: null, unitLabel: null, kcalPer100: 165, proteinPer100: 31, carbsPer100: 0, fatPer100: 3.6, searchTokens: ["chicken breast","grilled chicken"] },
+  { id: "keema_kofta", name: "Keema Kofta Curry", emoji: "🥩", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 185, proteinPer100: 15, carbsPer100: 5, fatPer100: 12, searchTokens: ["keema","kofta","keema curry","mince"] },
+  { id: "mutton_curry", name: "Mutton Curry", emoji: "🥩", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 180, proteinPer100: 16, carbsPer100: 3, fatPer100: 12, searchTokens: ["mutton curry","lamb curry","gosht"] },
+  { id: "fish_fried", name: "Fish Fried", emoji: "🐟", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Piece", kcalPer100: 220, proteinPer100: 18, carbsPer100: 8, fatPer100: 12, searchTokens: ["fish fried","fried fish","fish fry","fish cutlet"] },
+  { id: "prawn_curry", name: "Prawn Curry", emoji: "🦐", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Bowl", kcalPer100: 120, proteinPer100: 14, carbsPer100: 4, fatPer100: 5, searchTokens: ["prawn curry","shrimp curry","jhinga"] },
+  { id: "grilled_prawns", name: "Grilled Prawns with Lemon", emoji: "🦐", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Serving", kcalPer100: 99, proteinPer100: 18, carbsPer100: 1, fatPer100: 2, searchTokens: ["grilled prawns","grilled shrimp"] },
+  { id: "dosa", name: "Dosa, Plain", emoji: "🥞", mealTypes: [], tiles: false, variants: null, unitGrams: 130, unitLabel: "Dosa", kcalPer100: 168, proteinPer100: 3.9, carbsPer100: 29, fatPer100: 3.7, searchTokens: ["dosa","plain dosa","paper dosa"] },
+  { id: "masala_dosa", name: "Masala Dosa", emoji: "🥞", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Dosa", kcalPer100: 175, proteinPer100: 4, carbsPer100: 28, fatPer100: 5, searchTokens: ["masala dosa"] },
+  { id: "idli", name: "Idli", emoji: "⚪", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Idli", kcalPer100: 132, proteinPer100: 4, carbsPer100: 28, fatPer100: 0.5, searchTokens: ["idli","idly"] },
+  { id: "idli_sambar", name: "Idli with Sambar", emoji: "⚪", mealTypes: [], tiles: false, variants: null, unitGrams: 240, unitLabel: "Plate", kcalPer100: 100, proteinPer100: 3.5, carbsPer100: 20, fatPer100: 1, searchTokens: ["idli sambar","idli with sambar"] },
+  { id: "medu_vada", name: "Medu Vada", emoji: "🍩", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 322, proteinPer100: 10, carbsPer100: 38, fatPer100: 15, searchTokens: ["medu vada","vada","masala vada","urad dal vada"] },
+  { id: "upma", name: "Upma, Rava", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 130, proteinPer100: 3, carbsPer100: 20, fatPer100: 4, searchTokens: ["upma","rava upma","semolina upma","oats upma","vegetable upma"] },
+  { id: "dhokla", name: "Dhokla", emoji: "🟡", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 160, proteinPer100: 5, carbsPer100: 28, fatPer100: 3, searchTokens: ["dhokla","besan dhokla","khaman"] },
+  { id: "uttapam", name: "Rava Uttapam with Chutney", emoji: "🥞", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Piece", kcalPer100: 165, proteinPer100: 4, carbsPer100: 28, fatPer100: 5, searchTokens: ["uttapam","rava uttapam"] },
+  { id: "moong_cheela", name: "Moong Dal Cheela", emoji: "🥞", mealTypes: [], tiles: false, variants: null, unitGrams: 80, unitLabel: "Piece", kcalPer100: 145, proteinPer100: 8, carbsPer100: 22, fatPer100: 3, searchTokens: ["moong cheela","moong dal cheela","besan cheela"] },
+  { id: "samosa", name: "Samosa", emoji: "🥟", mealTypes: [], tiles: false, variants: null, unitGrams: 60, unitLabel: "Samosa", kcalPer100: 308, proteinPer100: 5.5, carbsPer100: 30, fatPer100: 18, searchTokens: ["samosa"] },
+  { id: "vada_pav", name: "Vada Pav", emoji: "🍔", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Piece", kcalPer100: 260, proteinPer100: 5, carbsPer100: 38, fatPer100: 9, searchTokens: ["vada pav","batata vada"] },
+  { id: "pav_bhaji", name: "Pav Bhaji", emoji: "🍛", mealTypes: [], tiles: false, variants: null, unitGrams: 300, unitLabel: "Plate", kcalPer100: 140, proteinPer100: 4, carbsPer100: 22, fatPer100: 4, searchTokens: ["pav bhaji"] },
+  { id: "pani_puri", name: "Pani Puri", emoji: "🫙", mealTypes: [], tiles: false, variants: null, unitGrams: 15, unitLabel: "Piece", kcalPer100: 350, proteinPer100: 5, carbsPer100: 55, fatPer100: 12, searchTokens: ["pani puri","golgappa","puchka"] },
+  { id: "bhel_puri", name: "Bhel Puri", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Plate", kcalPer100: 205, proteinPer100: 5, carbsPer100: 38, fatPer100: 5, searchTokens: ["bhel puri","bhel"] },
+  { id: "kachori", name: "Kachori", emoji: "🥮", mealTypes: [], tiles: false, variants: null, unitGrams: 60, unitLabel: "Piece", kcalPer100: 380, proteinPer100: 6, carbsPer100: 42, fatPer100: 20, searchTokens: ["kachori","khasta kachori","pea kachori"] },
+  { id: "momos", name: "Momos", emoji: "🥟", mealTypes: [], tiles: false, variants: ["Veg","Chicken"], unitGrams: 25, unitLabel: "Piece", kcalPer100: 180, proteinPer100: 6, carbsPer100: 22, fatPer100: 6, searchTokens: ["momos","momo","dumplings"] },
+  { id: "potato_chips", name: "Potato Chips", emoji: "🥔", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Serving", kcalPer100: 536, proteinPer100: 7, carbsPer100: 53, fatPer100: 34, searchTokens: ["potato chips","chips","crisps"] },
+  { id: "popcorn", name: "Popcorn, Air-Popped", emoji: "🍿", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Serving", kcalPer100: 375, proteinPer100: 11, carbsPer100: 74, fatPer100: 4, searchTokens: ["popcorn"] },
+  { id: "murukku", name: "Murukku", emoji: "🌀", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Serving", kcalPer100: 480, proteinPer100: 7, carbsPer100: 60, fatPer100: 23, searchTokens: ["murukku","chakli"] },
+  { id: "chivda", name: "Chivda / Sev Bhujia", emoji: "🍚", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Serving", kcalPer100: 510, proteinPer100: 9, carbsPer100: 55, fatPer100: 28, searchTokens: ["chivda","sev","bhujia","dry mix","namkeen"] },
+  { id: "biscuit", name: "Biscuit / Cookie", emoji: "🍪", mealTypes: [], tiles: false, variants: ["Sweet","Marie","Salt"], unitGrams: 10, unitLabel: "Biscuit", kcalPer100: 450, proteinPer100: 6.5, carbsPer100: 70, fatPer100: 16, searchTokens: ["biscuit","cookie","marie biscuit","salt biscuit","sweet biscuit"] },
+  { id: "banana_chips", name: "Banana Chips", emoji: "🍌", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Serving", kcalPer100: 519, proteinPer100: 2.3, carbsPer100: 58, fatPer100: 33, searchTokens: ["banana chips"] },
+  { id: "gulab_jamun", name: "Gulab Jamun", emoji: "🟤", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 380, proteinPer100: 5, carbsPer100: 55, fatPer100: 15, searchTokens: ["gulab jamun"] },
+  { id: "rasgulla", name: "Rasgulla", emoji: "⚪", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 186, proteinPer100: 5, carbsPer100: 38, fatPer100: 1.5, searchTokens: ["rasgulla","rosogolla"] },
+  { id: "jalebi", name: "Jalebi", emoji: "🟠", mealTypes: [], tiles: false, variants: null, unitGrams: 50, unitLabel: "Piece", kcalPer100: 395, proteinPer100: 4, carbsPer100: 65, fatPer100: 14, searchTokens: ["jalebi"] },
+  { id: "kheer", name: "Kheer", emoji: "🥛", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Bowl", kcalPer100: 160, proteinPer100: 4.5, carbsPer100: 28, fatPer100: 4, searchTokens: ["kheer","rice pudding","payasam"] },
+  { id: "halwa", name: "Gajar / Sooji Halwa", emoji: "🟠", mealTypes: [], tiles: false, variants: ["Gajar","Sooji"], unitGrams: 100, unitLabel: "Serving", kcalPer100: 280, proteinPer100: 5, carbsPer100: 38, fatPer100: 12, searchTokens: ["gajar halwa","carrot halwa","sooji halwa","halwa"] },
+  { id: "laddu", name: "Besan / Boondi Laddu", emoji: "🟡", mealTypes: [], tiles: false, variants: ["Besan","Boondi"], unitGrams: 40, unitLabel: "Piece", kcalPer100: 450, proteinPer100: 9, carbsPer100: 55, fatPer100: 22, searchTokens: ["besan laddu","laddu","boondi laddu"] },
+  { id: "barfi", name: "Mawa Barfi / Besan Barfi", emoji: "🟡", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Piece", kcalPer100: 420, proteinPer100: 8, carbsPer100: 52, fatPer100: 20, searchTokens: ["barfi","mawa barfi","besan barfi"] },
+  { id: "rasmalai", name: "Rasmalai", emoji: "⚪", mealTypes: [], tiles: false, variants: null, unitGrams: 80, unitLabel: "Piece", kcalPer100: 175, proteinPer100: 6, carbsPer100: 22, fatPer100: 7, searchTokens: ["rasmalai"] },
+  { id: "icecream", name: "Ice Cream", emoji: "🍦", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Scoop", kcalPer100: 207, proteinPer100: 3.5, carbsPer100: 24, fatPer100: 11, searchTokens: ["ice cream","icecream","custard"] },
+  { id: "chocolate", name: "Chocolate / Chocolate Bar", emoji: "🍫", mealTypes: [], tiles: false, variants: null, unitGrams: 20, unitLabel: "Piece", kcalPer100: 546, proteinPer100: 4.9, carbsPer100: 61, fatPer100: 31, searchTokens: ["chocolate","chocolate bar","milk chocolate"] },
+  { id: "fresh_lime", name: "Fresh Lime Juice", emoji: "🍋", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Glass", kcalPer100: 25, proteinPer100: 0.3, carbsPer100: 7, fatPer100: 0.1, searchTokens: ["lime juice","nimbu pani","lemon water","fresh lime"] },
+  { id: "coconut_water", name: "Coconut Water", emoji: "🥥", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Glass", kcalPer100: 19, proteinPer100: 0.7, carbsPer100: 3.7, fatPer100: 0.2, searchTokens: ["coconut water","nariyal pani"] },
+  { id: "cold_drink", name: "Cold Drink / Soda", emoji: "🥤", mealTypes: [], tiles: false, variants: null, unitGrams: 300, unitLabel: "Glass", kcalPer100: 42, proteinPer100: 0, carbsPer100: 11, fatPer100: 0, searchTokens: ["cold drink","soda","cola","pepsi","coke","cold drinks"] },
+  { id: "sugarcane_juice", name: "Sugarcane Juice, Fresh", emoji: "🥤", mealTypes: [], tiles: false, variants: null, unitGrams: 250, unitLabel: "Glass", kcalPer100: 70, proteinPer100: 0.4, carbsPer100: 18, fatPer100: 0.1, searchTokens: ["sugarcane juice","ganna juice"] },
+  { id: "tea_milk_sugar", name: "Tea (with Milk & Sugar)", emoji: "☕", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Cup", kcalPer100: 45, proteinPer100: 1.2, carbsPer100: 8, fatPer100: 1, searchTokens: ["tea milk sugar","masala chai","chai"] },
+  { id: "pizza", name: "Pizza, Cheese", emoji: "🍕", mealTypes: [], tiles: false, variants: ["Veg","Cheese","Pepperoni"], unitGrams: 110, unitLabel: "Slice", kcalPer100: 266, proteinPer100: 11, carbsPer100: 33, fatPer100: 10, searchTokens: ["pizza","cheese pizza"] },
+  { id: "burger", name: "Burger", emoji: "🍔", mealTypes: [], tiles: false, variants: ["Veg","Chicken","Cheese"], unitGrams: 220, unitLabel: "Burger", kcalPer100: 250, proteinPer100: 12, carbsPer100: 28, fatPer100: 10, searchTokens: ["burger","veg burger","chicken burger","non veg burger"] },
+  { id: "pasta", name: "Pasta, Cooked", emoji: "🍝", mealTypes: [], tiles: false, variants: null, unitGrams: 200, unitLabel: "Plate", kcalPer100: 158, proteinPer100: 5.8, carbsPer100: 31, fatPer100: 1, searchTokens: ["pasta","spaghetti","macaroni"] },
+  { id: "noodles", name: "Hakka Noodles", emoji: "🍜", mealTypes: [], tiles: false, variants: ["Veg","Chicken"], unitGrams: 200, unitLabel: "Plate", kcalPer100: 138, proteinPer100: 4.5, carbsPer100: 25, fatPer100: 2.5, searchTokens: ["noodles","hakka noodles","chowmein"] },
+  { id: "frenchfries", name: "French Fries", emoji: "🍟", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Serving", kcalPer100: 312, proteinPer100: 3.4, carbsPer100: 41, fatPer100: 15, searchTokens: ["fries","french fries"] },
+  { id: "sandwich", name: "Veg Sandwich", emoji: "🥪", mealTypes: [], tiles: false, variants: null, unitGrams: 150, unitLabel: "Sandwich", kcalPer100: 220, proteinPer100: 7, carbsPer100: 35, fatPer100: 6, searchTokens: ["sandwich","veg sandwich","vegetable puff"] },
+  { id: "protein_bar", name: "Protein Bar", emoji: "🍫", mealTypes: [], tiles: false, variants: null, unitGrams: 60, unitLabel: "Bar", kcalPer100: 380, proteinPer100: 30, carbsPer100: 40, fatPer100: 10, searchTokens: ["protein bar","energy bar"] },
+  { id: "protein_shake", name: "Protein Shake", emoji: "🥤", mealTypes: [], tiles: false, variants: null, unitGrams: 300, unitLabel: "Glass", kcalPer100: 60, proteinPer100: 9, carbsPer100: 5, fatPer100: 1, searchTokens: ["protein shake","whey shake","chocolate shake","cold coffee"] },
+  { id: "peanut_chikki", name: "Peanut Chikki", emoji: "🟤", mealTypes: [], tiles: false, variants: null, unitGrams: 30, unitLabel: "Piece", kcalPer100: 440, proteinPer100: 12, carbsPer100: 55, fatPer100: 20, searchTokens: ["peanut chikki","chikki","groundnut chikki"] },
+  { id: "mysore_pak", name: "Mysore Pak", emoji: "🟡", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Piece", kcalPer100: 490, proteinPer100: 7, carbsPer100: 52, fatPer100: 28, searchTokens: ["mysore pak"] },
+  { id: "sandesh", name: "Sandesh", emoji: "⚪", mealTypes: [], tiles: false, variants: null, unitGrams: 40, unitLabel: "Piece", kcalPer100: 250, proteinPer100: 9, carbsPer100: 30, fatPer100: 10, searchTokens: ["sandesh","bengali sweet"] },
+  { id: "srikhand", name: "Srikhand", emoji: "🥛", mealTypes: [], tiles: false, variants: null, unitGrams: 100, unitLabel: "Bowl", kcalPer100: 210, proteinPer100: 6, carbsPer100: 35, fatPer100: 5, searchTokens: ["srikhand","shrikhand"] },
 ];
-
-export function getFoodById(id) {
-  return FOOD_LIBRARY.find((f) => f.id === id) || null;
-}
-
-export function getFoodsForMeal(mealType) {
-  return FOOD_LIBRARY.filter((f) => f.tiles && f.mealTypes.includes(mealType));
-}
-
-// Search across ALL foods (tile or not) by name and search tokens. Used by the
-// food logger's search bar so items like samosa/pizza/burger are reachable even
-// though they don't clutter the default tile grid (FR-2.5).
+export function getFoodById(id) { return FOOD_LIBRARY.find((f) => f.id === id) || null; }
+export function getFoodsForMeal(mealType) { return FOOD_LIBRARY.filter((f) => f.tiles && f.mealTypes.includes(mealType)); }
 export function searchFoods(query) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   return FOOD_LIBRARY.filter((f) => {
     if (f.name.toLowerCase().includes(q)) return true;
-    if (f.searchTokens) {
-      return f.searchTokens.some((t) => t.toLowerCase().includes(q));
-    }
+    if (f.searchTokens) return f.searchTokens.some((t) => t.toLowerCase().includes(q));
     return false;
-  }).slice(0, 20);
+  }).slice(0, 30);
 }
-
-export function calcKcal(food, grams) {
-  return Math.round((food.kcalPer100 * grams) / 100);
-}
-
-export function calcMacro(food, grams, key) {
-  // key: "proteinPer100" | "carbsPer100" | "fatPer100"
-  return Math.round(((food[key] * grams) / 100) * 10) / 10;
-}
+export function calcKcal(food, grams) { return Math.round((food.kcalPer100 * grams) / 100); }
+export function calcMacro(food, grams, key) { return Math.round(((food[key] * grams) / 100) * 10) / 10; }
