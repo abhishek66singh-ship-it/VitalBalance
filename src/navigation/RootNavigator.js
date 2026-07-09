@@ -14,9 +14,11 @@ import FoodLoggerScreen from "../screens/FoodLoggerScreen";
 import TrendsScreen from "../screens/TrendsScreen";
 import DailyReportScreen from "../screens/DailyReportScreen";
 import SettingsScreen from "../screens/SettingsScreen";
+
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
+
 function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
@@ -25,9 +27,32 @@ function AuthNavigator() {
     </AuthStack.Navigator>
   );
 }
+
 function MainTabs() {
   return (
-    <Tabs.Navigator screenOptions={{ headerShown: false, tabBarActiveTintColor: theme.colors.primary, tabBarInactiveTintColor: "#C8BFAF", tabBarStyle: { borderTopColor: theme.colors.border, backgroundColor: theme.colors.surface, height: Platform.OS === "android" ? 62 : 82, paddingBottom: Platform.OS === "android" ? 8 : 24, paddingTop: 8, elevation: 8 }, tabBarLabelStyle: { fontSize: 10, fontWeight: "600" } }}>
+    <Tabs.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: "#C8BFAF",
+        tabBarStyle: {
+          display: "flex",
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          borderTopColor: theme.colors.border,
+          borderTopWidth: 1,
+          backgroundColor: theme.colors.surface,
+          height: Platform.OS === "android" ? 65 : 82,
+          paddingBottom: Platform.OS === "android" ? 10 : 24,
+          paddingTop: 8,
+          elevation: 10,
+          zIndex: 100,
+        },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: "600" },
+      }}
+    >
       <Tabs.Screen name="Today" component={HomeScreen} options={{ tabBarIcon: ({ color, size }) => <Home color={color} size={size} /> }} />
       <Tabs.Screen name="Report" component={DailyReportScreen} options={{ tabBarIcon: ({ color, size }) => <FileText color={color} size={size} /> }} />
       <Tabs.Screen name="Trends" component={TrendsScreen} options={{ tabBarIcon: ({ color, size }) => <BarChart3 color={color} size={size} /> }} />
@@ -35,6 +60,7 @@ function MainTabs() {
     </Tabs.Navigator>
   );
 }
+
 function MainNavigator() {
   return (
     <MainStack.Navigator screenOptions={{ headerShown: false }}>
@@ -43,14 +69,17 @@ function MainNavigator() {
     </MainStack.Navigator>
   );
 }
+
 export default function RootNavigator() {
   const { user, profile, initializing } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
+
   useEffect(() => {
     if (!initializing) return;
     const timer = setTimeout(() => setTimedOut(true), 10000);
     return () => clearTimeout(timer);
   }, [initializing]);
+
   if (initializing && timedOut) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.background, padding: 32 }}>
@@ -59,6 +88,7 @@ export default function RootNavigator() {
       </View>
     );
   }
+
   if (initializing) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.background }}>
@@ -67,6 +97,7 @@ export default function RootNavigator() {
       </View>
     );
   }
+
   return (
     <NavigationContainer>
       {!user ? <AuthNavigator /> : !profile?.onboardingComplete ? <OnboardingScreen /> : <MainNavigator />}
