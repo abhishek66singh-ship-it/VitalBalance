@@ -32,6 +32,7 @@ export function AuthProvider({ children }) {
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
     scopes: ["profile", "email"],
+    responseType: "id_token",
   });
 
   useEffect(() => {
@@ -153,18 +154,5 @@ export function useAuth() {
 }
 
 function mapAuthError(e) {
-  switch (e.code) {
-    case "auth/email-already-in-use":
-      return "That email is already registered. Try signing in instead.";
-    case "auth/invalid-email":
-      return "That email address looks invalid.";
-    case "auth/weak-password":
-      return "Password should be at least 6 characters.";
-    case "auth/user-not-found":
-    case "auth/wrong-password":
-    case "auth/invalid-credential":
-      return "Incorrect email or password.";
-    default:
-      return e.message || "Something went wrong. Please try again.";
-  }
+  return `[${e.code}] ${e.message}`;
 }

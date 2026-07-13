@@ -63,6 +63,12 @@ export default function LoginScreen({ navigation }) {
               secureTextEntry
             />
 
+            {authError ? (
+              <Text style={{ color: theme.colors.error || "red", textAlign: "center", marginBottom: 12, marginTop: 4 }}>
+                {authError}
+              </Text>
+            ) : null}
+
             <Button title="Sign In" onPress={handleEmailSignIn} loading={loading} style={{ marginTop: 4 }} />
 
             <View style={styles.dividerRow}>
