@@ -3,6 +3,7 @@ import { View, ActivityIndicator, Text, Platform } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Home, BarChart3, FileText, Settings } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { theme } from "../theme";
@@ -14,9 +15,11 @@ import FoodLoggerScreen from "../screens/FoodLoggerScreen";
 import TrendsScreen from "../screens/TrendsScreen";
 import DailyReportScreen from "../screens/DailyReportScreen";
 import SettingsScreen from "../screens/SettingsScreen";
+
 const AuthStack = createNativeStackNavigator();
 const MainStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
+
 function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
@@ -25,7 +28,14 @@ function AuthNavigator() {
     </AuthStack.Navigator>
   );
 }
+
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+  // Use safe area insets to account for Android gesture bar and iOS home indicator
+  const tabBarHeight = Platform.OS === "android"
+    ? 56 + insets.bottom
+    : 50 + insets.bottom;
+
   return (
     <Tabs.Navigator
       screenOptions={{
@@ -37,11 +47,20 @@ function MainTabs() {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
-          height: Platform.OS === "android" ? 60 : 80,
-          paddingBottom: Platform.OS === "android" ? 6 : 20,
+          height: tabBarHeight,
+          paddingBottom: insets.bottom + 4,
           paddingTop: 6,
+          elevation: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.08,
+          shadowRadius: 4,
         },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "600" },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: "600",
+          marginBottom: 2,
+        },
       }}
     >
       <Tabs.Screen name="Today" component={HomeScreen} options={{ tabBarIcon: ({ color }) => <Home color={color} size={22} /> }} />
@@ -51,6 +70,7 @@ function MainTabs() {
     </Tabs.Navigator>
   );
 }
+
 function MainNavigator() {
   return (
     <MainStack.Navigator screenOptions={{ headerShown: false }}>
@@ -59,14 +79,17 @@ function MainNavigator() {
     </MainStack.Navigator>
   );
 }
+
 export default function RootNavigator() {
   const { user, profile, initializing } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
+
   useEffect(() => {
     if (!initializing) return;
     const timer = setTimeout(() => setTimedOut(true), 10000);
     return () => clearTimeout(timer);
   }, [initializing]);
+
   if (initializing && timedOut) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.background, padding: 32 }}>
@@ -75,6 +98,7 @@ export default function RootNavigator() {
       </View>
     );
   }
+
   if (initializing) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.background }}>
@@ -83,6 +107,7 @@ export default function RootNavigator() {
       </View>
     );
   }
+
   return (
     <NavigationContainer>
       {!user ? <AuthNavigator /> : !profile?.onboardingComplete ? <OnboardingScreen /> : <MainNavigator />}
