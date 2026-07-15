@@ -1,4 +1,3 @@
-mkdir -p /home/claude/vitalbalance/src/services && cat > /home/claude/vitalbalance/src/services/activityService.js << 'ENDOFFILE'
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -274,4 +273,3 @@ export async function getTodayActivity(weightKg = 65, heightCm = 170, age = 30, 
   const distanceKm = estimateDistanceFromSteps(steps, heightCm);
   return { steps, caloriesBurned, distanceKm, available: true };
 }
-ENDOFFILE
