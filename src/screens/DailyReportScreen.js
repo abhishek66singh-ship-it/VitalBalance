@@ -119,7 +119,7 @@ export default function DailyReportScreen() {
       // For today: also fetch live activity data from the sensor
       // so Report matches the dashboard exactly (not stale Firestore data)
       if (selectedDate === todayDateKey) {
-        const live = await getTodayActivity(profile?.weightKg, profile?.heightCm);
+        const live = await getTodayActivity(profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex);
         if (live.available) setLiveActivity(live);
         else setLiveActivity(null);
       } else {

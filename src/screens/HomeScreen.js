@@ -29,7 +29,7 @@ export default function HomeScreen({ navigation }) {
     const key = todayKey();
     const weightKg = profile?.weightKg;
     const heightCm = profile?.heightCm;
-    const liveActivity = await getTodayActivity(weightKg, heightCm);
+    const liveActivity = await getTodayActivity(weightKg, heightCm, profile?.age, profile?.sex);
     setPedometerAvailable(liveActivity.available);
     if (liveActivity.available) {
       await setDayActivity(user.uid, key, {
@@ -49,7 +49,7 @@ export default function HomeScreen({ navigation }) {
       steps: liveActivity.available ? liveActivity.steps : (day.steps ?? 0),
       distanceKm: liveActivity.available ? liveActivity.distanceKm : (day.distanceKm ?? 0),
     });
-  }, [user, profile?.weightKg, profile?.heightCm]);
+  }, [user, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -68,10 +68,10 @@ export default function HomeScreen({ navigation }) {
         const { totalSteps, caloriesBurned, distanceKm } = data;
         setActivity({ steps: totalSteps, caloriesBurned, distanceKm });
         setDayActivity(user.uid, todayKey(), { steps: totalSteps, caloriesBurned, distanceKm }).catch(() => {});
-      }, base, profile?.weightKg, profile?.heightCm);
+      }, base, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex);
     })();
     return () => sub?.remove();
-  }, [user, profile?.weightKg, profile?.heightCm]);
+  }, [user, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
 
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
 

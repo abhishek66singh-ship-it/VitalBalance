@@ -1,3 +1,4 @@
+mkdir -p /home/claude/vitalbalance/src/services && cat > /home/claude/vitalbalance/src/services/activityService.js << 'ENDOFFILE'
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -10,65 +11,88 @@ if (isNative) {
   Pedometer = require("expo-sensors").Pedometer;
 }
 
-const STRIDE_LENGTH_KM = 0.000762;
-const DEFAULT_WEIGHT_KG = 65;
+// ─────────────────────────────────────────────────────────────────────────────
+// 24-HOUR INTERVAL MODEL
+// C_i = BMR_hour + Movement_Premium_i for each hour i
+// Movement Premium uses Net MET applied only to actual moving minutes.
+// Speed is dynamically measured (distance/time) from rolling window when
+// available, falling back to step-count bucket defaults otherwise.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// MET values from Compendium of Physical Activities (standard reference)
-function getMET(speedKmh) {
-  if (speedKmh < 3) return 2.0;    // very slow / standing
-  if (speedKmh < 4.5) return 2.8;  // slow walk
-  if (speedKmh < 5.5) return 3.5;  // normal walk
-  if (speedKmh < 7) return 4.3;    // brisk walk
-  if (speedKmh < 9) return 7.0;    // light jog
-  if (speedKmh < 11) return 10.5;  // running
-  return 12.5;                      // fast running
+// Mifflin-St Jeor BMR (kcal/day)
+function calculateBMR(weightKg, heightCm, age, sex) {
+  const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
+  return sex === "male" ? base + 5 : base - 161;
 }
 
-// Calorie estimation using MET × weight × duration.
-// For Android we track step rate over a rolling 5-minute window to detect
-// if the user is walking vs jogging vs running, then apply appropriate MET.
-// stepRate: steps per minute (from rolling window)
-export function estimateCaloriesFromStepRate(steps, weightKg = DEFAULT_WEIGHT_KG, stepRatePerMin = null, durationHours = null) {
+// Step count → intensity bucket (used as speed fallback when no live window)
+function classifyHour(steps) {
+  if (steps === 0)    return { speed_ms: 0,    netMet: 0,   label: "Rest" };
+  if (steps < 500)   return { speed_ms: 0.8,  netMet: 1.0, label: "Incidental" };
+  if (steps < 2000)  return { speed_ms: 1.0,  netMet: 1.5, label: "Light Activity" };
+  return               { speed_ms: 1.34, netMet: 2.5, label: "Exercise" };
+}
+
+// Net MET from measured or default speed
+function netMetFromSpeed(speedMs) {
+  const kmh = speedMs * 3.6;
+  if (kmh < 1)   return 0;
+  if (kmh < 4)   return 1.0;
+  if (kmh < 5.5) return 1.5;
+  if (kmh < 7)   return 2.3;
+  if (kmh < 9)   return 6.0;
+  if (kmh < 11)  return 9.5;
+  return 11.5;
+}
+
+// Movement premium for one hour (kcal above BMR)
+// Only charges for minutes actually walking — rest of the hour stays at BMR
+function movementPremium(steps, weightKg, heightCm, measuredSpeed_ms = null) {
   if (steps === 0) return 0;
+  const heightM = heightCm / 100;
+  const strideM = heightM * 0.414;            // Grieve & Gear validated formula
+  const distanceM = steps * strideM;
 
-  let speedKmh;
+  // Use dynamic speed if measured, else bucket default
+  const { speed_ms: defaultSpeed } = classifyHour(steps);
+  const effectiveSpeed = (measuredSpeed_ms && measuredSpeed_ms > 0)
+    ? measuredSpeed_ms
+    : defaultSpeed;
 
-  if (stepRatePerMin !== null && stepRatePerMin > 0) {
-    // Convert step rate to speed: steps/min × stride_km × 60 = km/h
-    speedKmh = stepRatePerMin * STRIDE_LENGTH_KM * 60;
-  } else if (durationHours !== null && durationHours > 0) {
-    // Fallback: use total steps and total duration
-    const distanceKm = steps * STRIDE_LENGTH_KM;
-    speedKmh = distanceKm / durationHours;
-  } else {
-    // No timing info — assume average walking pace
-    speedKmh = 4.5;
+  if (effectiveSpeed === 0) return 0;
+
+  const tMovingMin = distanceM / (effectiveSpeed * 60); // actual walking minutes
+  const netMet = measuredSpeed_ms
+    ? netMetFromSpeed(measuredSpeed_ms)
+    : classifyHour(steps).netMet;
+
+  // Net MET formula: only moving minutes charged above BMR
+  return (netMet * 3.5 * weightKg / 200) * tMovingMin;
+}
+
+// Total calories for one hour
+function caloriesForHour(steps, weightKg, heightCm, bmrPerHour, measuredSpeed_ms = null) {
+  return bmrPerHour + movementPremium(steps, weightKg, heightCm, measuredSpeed_ms);
+}
+
+// Full 24h sum — the main model
+export function calculateDayCalories(hourlySteps, weightKg, heightCm, age, sex) {
+  const bmr = calculateBMR(weightKg, heightCm, age, sex);
+  const bmrPerHour = bmr / 24;
+  const currentHour = new Date().getHours();
+  let total = 0;
+  for (let h = 0; h <= currentHour; h++) {
+    total += caloriesForHour(hourlySteps[h] || 0, weightKg, heightCm, bmrPerHour);
   }
-
-  const met = getMET(speedKmh);
-  const hours = durationHours || (steps / (stepRatePerMin || 80) / 60);
-  return Math.round(met * weightKg * Math.max(hours, 0.01));
+  return Math.round(total);
 }
 
-// Simple version for one-shot calculation (used in getTodayActivity)
-export function estimateCaloriesFromSteps(steps, weightKg = DEFAULT_WEIGHT_KG, durationHours = null) {
-  return estimateCaloriesFromStepRate(steps, weightKg, null, durationHours);
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// HOURLY STEP BUCKETS — persisted to AsyncStorage
+// ─────────────────────────────────────────────────────────────────────────────
 
-export function estimateDistanceFromSteps(steps, heightCm = 170) {
-  const heightFactor = heightCm / 170;
-  return Math.round(steps * STRIDE_LENGTH_KM * heightFactor * 100) / 100;
-}
-
-function getDurationHoursSinceMidnight() {
-  const now = new Date();
-  const midnight = new Date();
-  midnight.setHours(0, 0, 0, 0);
-  return (now.getTime() - midnight.getTime()) / 3600000;
-}
-
-// ---- Android step persistence ----
 const STEPS_DATE_KEY = "vb_steps_date";
+const STEPS_HOURLY_KEY = "vb_steps_hourly";
 const STEPS_TOTAL_KEY = "vb_steps_total";
 
 function todayString() {
@@ -76,25 +100,81 @@ function todayString() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-async function getPersistedSteps() {
+async function getHourlySteps() {
   try {
     const savedDate = await AsyncStorage.getItem(STEPS_DATE_KEY);
-    const today = todayString();
-    if (savedDate !== today) {
-      await AsyncStorage.setItem(STEPS_DATE_KEY, today);
+    if (savedDate !== todayString()) {
+      const fresh = new Array(24).fill(0);
+      await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
+      await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(fresh));
       await AsyncStorage.setItem(STEPS_TOTAL_KEY, "0");
-      return 0;
+      return fresh;
     }
+    const saved = await AsyncStorage.getItem(STEPS_HOURLY_KEY);
+    return saved ? JSON.parse(saved) : new Array(24).fill(0);
+  } catch { return new Array(24).fill(0); }
+}
+
+async function updateHourlySteps(totalSteps) {
+  try {
+    const hourly = await getHourlySteps();
+    const prevTotal = hourly.reduce((a, b) => a + b, 0);
+    const delta = Math.max(0, totalSteps - prevTotal);
+    if (delta === 0) return hourly;
+    const h = new Date().getHours();
+    hourly[h] = (hourly[h] || 0) + delta;
+    await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourly));
+    await AsyncStorage.setItem(STEPS_TOTAL_KEY, String(totalSteps));
+    return hourly;
+  } catch { return new Array(24).fill(0); }
+}
+
+async function getPersistedTotal() {
+  try {
+    const savedDate = await AsyncStorage.getItem(STEPS_DATE_KEY);
+    if (savedDate !== todayString()) return 0;
     const saved = await AsyncStorage.getItem(STEPS_TOTAL_KEY);
     return saved ? parseInt(saved, 10) : 0;
   } catch { return 0; }
 }
 
-async function persistSteps(steps) {
-  try {
-    await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
-    await AsyncStorage.setItem(STEPS_TOTAL_KEY, String(steps));
-  } catch {}
+// iOS: reconstruct hourly breakdown from HealthKit hour-by-hour queries
+async function buildHourlyFromiOS() {
+  const hourly = new Array(24).fill(0);
+  const currentHour = new Date().getHours();
+  for (let h = 0; h <= currentHour; h++) {
+    const start = new Date(); start.setHours(h, 0, 0, 0);
+    const end = new Date();   end.setHours(h, 59, 59, 999);
+    if (end > new Date()) end.setTime(Date.now());
+    try {
+      const result = await Pedometer.getStepCountAsync(start, end);
+      hourly[h] = result?.steps ?? 0;
+    } catch { hourly[h] = 0; }
+  }
+  await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
+  await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourly));
+  return hourly;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function estimateDistanceFromSteps(steps, heightCm = 170) {
+  const strideM = (heightCm / 100) * 0.414;
+  return Math.round(steps * strideM / 1000 * 100) / 100;
+}
+
+// Simple estimate when no hourly data (e.g. web fallback)
+export function estimateCaloriesFromSteps(steps, weightKg = 65, heightCm = 170, age = 30, sex = "male") {
+  if (steps === 0) return 0;
+  const hourly = new Array(24).fill(0);
+  // Spread steps across likely active hours (6am-10pm) proportionally
+  const activeHours = 16;
+  const stepsPerHour = Math.floor(steps / activeHours);
+  for (let h = 6; h < 22; h++) hourly[h] = stepsPerHour;
+  hourly[6] += steps - stepsPerHour * activeHours; // remainder
+  return calculateDayCalories(hourly, weightKg, heightCm, age, sex);
 }
 
 export async function isPedometerAvailable() {
@@ -115,64 +195,71 @@ export async function getTodayStepCount() {
   if (!isNative || !Pedometer) return 0;
   if (isIOS) {
     const end = new Date();
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const start = new Date(); start.setHours(0, 0, 0, 0);
     try {
       const result = await Pedometer.getStepCountAsync(start, end);
       return result?.steps ?? 0;
     } catch { return 0; }
   }
-  return await getPersistedSteps();
+  return await getPersistedTotal();
 }
 
-// Subscribe to live step updates.
-// onUpdate receives: { totalSteps, stepRatePerMin, caloriesBurned, distanceKm }
-// Step rate is measured over a rolling 60-second window to detect
-// walk vs jog vs run and apply the right MET for calorie calc.
-export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = DEFAULT_WEIGHT_KG, heightCm = 170) {
+// Live subscription with dynamic speed from rolling window
+export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, heightCm = 170, age = 30, sex = "male") {
   if (!isNative || !Pedometer) return { remove: () => {} };
 
-  // Rolling window to track step rate
-  const WINDOW_MS = 60000; // 60-second window for speed detection
-  const stepHistory = []; // [{ steps, time }]
+  const WINDOW_MS = 60000; // 60-second rolling window for speed
+  const stepHistory = [];
 
   const sub = Pedometer.watchStepCount(async (result) => {
     const now = Date.now();
     const totalSteps = baseSteps + result.steps;
 
-    // Add to rolling history
+    // Rolling window
     stepHistory.push({ steps: totalSteps, time: now });
-
-    // Remove entries older than window
     while (stepHistory.length > 1 && now - stepHistory[0].time > WINDOW_MS) {
       stepHistory.shift();
     }
 
-    // Calculate step rate from rolling window
-    let stepRatePerMin = null;
+    // Dynamic speed from window (distance/time — the key improvement)
+    let measuredSpeed_ms = null;
     if (stepHistory.length >= 2) {
       const oldest = stepHistory[0];
       const newest = stepHistory[stepHistory.length - 1];
       const stepDelta = newest.steps - oldest.steps;
-      const timeDeltaMin = (newest.time - oldest.time) / 60000;
-      if (timeDeltaMin > 0) {
-        stepRatePerMin = stepDelta / timeDeltaMin;
+      const timeSec = (newest.time - oldest.time) / 1000;
+      if (timeSec > 0 && stepDelta > 5) {
+        const strideM = (heightCm / 100) * 0.414;
+        measuredSpeed_ms = (stepDelta * strideM) / timeSec;
       }
     }
 
-    const durationHours = getDurationHoursSinceMidnight();
-    const caloriesBurned = estimateCaloriesFromStepRate(totalSteps, weightKg, stepRatePerMin, durationHours);
+    // Update hourly buckets
+    const hourlySteps = await updateHourlySteps(totalSteps);
+
+    // Full 24h model with measured speed for current hour
+    const bmr = calculateBMR(weightKg, heightCm, age, sex);
+    const bmrPerHour = bmr / 24;
+    const currentHour = new Date().getHours();
+    let caloriesBurned = 0;
+    for (let h = 0; h < currentHour; h++) {
+      caloriesBurned += caloriesForHour(hourlySteps[h] || 0, weightKg, heightCm, bmrPerHour);
+    }
+    // Current hour uses measured speed from rolling window
+    caloriesBurned += caloriesForHour(
+      hourlySteps[currentHour] || 0,
+      weightKg, heightCm, bmrPerHour, measuredSpeed_ms
+    );
+    caloriesBurned = Math.round(caloriesBurned);
+
     const distanceKm = estimateDistanceFromSteps(totalSteps, heightCm);
-
-    if (isAndroid) { await persistSteps(totalSteps); }
-
-    onUpdate({ totalSteps, stepRatePerMin, caloriesBurned, distanceKm });
+    onUpdate({ totalSteps, caloriesBurned, distanceKm });
   });
 
   return sub;
 }
 
-export async function getTodayActivity(weightKg, heightCm) {
+export async function getTodayActivity(weightKg = 65, heightCm = 170, age = 30, sex = "male") {
   if (!isNative || !Pedometer) {
     return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
   }
@@ -182,8 +269,10 @@ export async function getTodayActivity(weightKg, heightCm) {
   if (!granted) return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
 
   const steps = await getTodayStepCount();
-  const durationHours = getDurationHoursSinceMidnight();
-  const caloriesBurned = estimateCaloriesFromSteps(steps, weightKg, durationHours);
+  const hourlySteps = isIOS ? await buildHourlyFromiOS() : await getHourlySteps();
+  const caloriesBurned = calculateDayCalories(hourlySteps, weightKg, heightCm, age, sex);
   const distanceKm = estimateDistanceFromSteps(steps, heightCm);
   return { steps, caloriesBurned, distanceKm, available: true };
 }
+ENDOFFILE
+echo "done"
