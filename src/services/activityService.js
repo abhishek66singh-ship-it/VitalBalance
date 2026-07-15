@@ -275,4 +275,3 @@ export async function getTodayActivity(weightKg = 65, heightCm = 170, age = 30, 
   return { steps, caloriesBurned, distanceKm, available: true };
 }
 ENDOFFILE
-echo "done"
