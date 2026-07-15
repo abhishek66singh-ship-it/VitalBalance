@@ -14,8 +14,8 @@ if (isNative) {
 // 24-HOUR INTERVAL MODEL
 // C_i = BMR_hour + Movement_Premium_i for each hour i
 // Movement Premium uses Net MET applied only to actual moving minutes.
-// Speed is dynamically measured (distance/time) from rolling window when
-// available, falling back to step-count bucket defaults otherwise.
+// Speed and stride length are dynamically estimated from expanded step-count 
+// brackets when no live window is available, falling back to bucket defaults.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Mifflin-St Jeor BMR (kcal/day)
@@ -24,12 +24,50 @@ function calculateBMR(weightKg, heightCm, age, sex) {
   return sex === "male" ? base + 5 : base - 161;
 }
 
-// Step count → intensity bucket (used as speed fallback when no live window)
-function classifyHour(steps) {
-  if (steps === 0)    return { speed_ms: 0,    netMet: 0,   label: "Rest" };
-  if (steps < 500)   return { speed_ms: 0.8,  netMet: 1.0, label: "Incidental" };
-  if (steps < 2000)  return { speed_ms: 1.0,  netMet: 1.5, label: "Light Activity" };
-  return               { speed_ms: 1.34, netMet: 2.5, label: "Exercise" };
+/**
+ * Classifies an hour of activity into granular intensity brackets.
+ * Calculates dynamic speed, METs, and stride length based on hourly step volume.
+ * Stride ratios are adjusted dynamically relative to height based on physical intensity.
+ */
+function classifyHour(steps, heightCm = 170) {
+  const heightM = heightCm / 100;
+
+  if (steps === 0) {
+    return { speed_ms: 0, netMet: 0, strideM: 0, label: "Rest" };
+  }
+  
+  // 1. Minimal Shuffling (Short, hesitant paces)
+  if (steps < 300) {
+    return { speed_ms: 0.6, netMet: 0.5, strideM: heightM * 0.35, label: "Minimal Incidental" };
+  }
+  
+  // 2. Household Mobility (Slightly larger but still casual indoor paces)
+  if (steps < 1000) {
+    return { speed_ms: 0.8, netMet: 1.0, strideM: heightM * 0.38, label: "Incidental Activity" };
+  }
+  
+  // 3. Casual Walking (Standard Grieve & Gear baseline)
+  if (steps < 2500) {
+    return { speed_ms: 1.0, netMet: 1.5, strideM: heightM * 0.414, label: "Casual Walking" };
+  }
+  
+  // 4. Steady Walking (Purposeful, slightly elongated strides)
+  if (steps < 4500) {
+    return { speed_ms: 1.25, netMet: 2.0, strideM: heightM * 0.43, label: "Steady Walking" };
+  }
+  
+  // 5. Brisk Fitness Walking (Active power-walking stride)
+  if (steps < 6500) {
+    return { speed_ms: 1.45, netMet: 3.0, strideM: heightM * 0.45, label: "Brisk Walking" };
+  }
+  
+  // 6. Very Fast Walking / Slow Jogging Hybrid
+  if (steps < 8500) {
+    return { speed_ms: 1.8, netMet: 4.5, strideM: heightM * 0.52, label: "Very High Intensity Walk/Jog" };
+  }
+  
+  // 7. Running (Dramatically elongated stride due to high momentum)
+  return { speed_ms: 2.5, netMet: 7.0, strideM: heightM * 0.65, label: "Running" };
 }
 
 // Net MET from measured or default speed
@@ -48,22 +86,22 @@ function netMetFromSpeed(speedMs) {
 // Only charges for minutes actually walking — rest of the hour stays at BMR
 function movementPremium(steps, weightKg, heightCm, measuredSpeed_ms = null) {
   if (steps === 0) return 0;
-  const heightM = heightCm / 100;
-  const strideM = heightM * 0.414;            // Grieve & Gear validated formula
-  const distanceM = steps * strideM;
+
+  // Fetch dynamic constants and stride length from the new bucket function
+  const bucketData = classifyHour(steps, heightCm);
+  const distanceM = steps * bucketData.strideM;
 
   // Use dynamic speed if measured, else bucket default
-  const { speed_ms: defaultSpeed } = classifyHour(steps);
   const effectiveSpeed = (measuredSpeed_ms && measuredSpeed_ms > 0)
     ? measuredSpeed_ms
-    : defaultSpeed;
+    : bucketData.speed_ms;
 
   if (effectiveSpeed === 0) return 0;
 
   const tMovingMin = distanceM / (effectiveSpeed * 60); // actual walking minutes
   const netMet = measuredSpeed_ms
     ? netMetFromSpeed(measuredSpeed_ms)
-    : classifyHour(steps).netMet;
+    : bucketData.netMet;
 
   // Net MET formula: only moving minutes charged above BMR
   return (netMet * 3.5 * weightKg / 200) * tMovingMin;
@@ -172,7 +210,7 @@ export function estimateCaloriesFromSteps(steps, weightKg = 65, heightCm = 170, 
   const activeHours = 16;
   const stepsPerHour = Math.floor(steps / activeHours);
   for (let h = 6; h < 22; h++) hourly[h] = stepsPerHour;
-  hourly[6] += steps - stepsPerHour * activeHours; // remainder
+  hourly[6] += steps - stepsPerHour * activeHours; // remainder added cleanly to index 6
   return calculateDayCalories(hourly, weightKg, heightCm, age, sex);
 }
 
@@ -202,7 +240,6 @@ export async function getTodayStepCount() {
   }
   return await getPersistedTotal();
 }
-
 // Live subscription with dynamic speed from rolling window
 export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, heightCm = 170, age = 30, sex = "male") {
   if (!isNative || !Pedometer) return { remove: () => {} };
@@ -214,21 +251,24 @@ export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, h
     const now = Date.now();
     const totalSteps = baseSteps + result.steps;
 
-    // Rolling window
+    // Rolling window cleanup
     stepHistory.push({ steps: totalSteps, time: now });
-    while (stepHistory.length > 1 && now - stepHistory[0].time > WINDOW_MS) {
+    while (stepHistory.length > 1 && (now - stepHistory[0].time) > WINDOW_MS) {
       stepHistory.shift();
     }
 
-    // Dynamic speed from window (distance/time — the key improvement)
+    // Dynamic speed from window (distance/time — using upgraded step brackets)
     let measuredSpeed_ms = null;
     if (stepHistory.length >= 2) {
       const oldest = stepHistory[0];
       const newest = stepHistory[stepHistory.length - 1];
       const stepDelta = newest.steps - oldest.steps;
       const timeSec = (newest.time - oldest.time) / 1000;
+      
       if (timeSec > 0 && stepDelta > 5) {
-        const strideM = (heightCm / 100) * 0.414;
+        // Estimate stride length dynamically using the cadence/step intensity inside the live window
+        const bucketData = classifyHour(stepDelta, heightCm);
+        const strideM = bucketData.strideM > 0 ? bucketData.strideM : (heightCm / 100) * 0.414;
         measuredSpeed_ms = (stepDelta * strideM) / timeSec;
       }
     }
@@ -241,9 +281,11 @@ export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, h
     const bmrPerHour = bmr / 24;
     const currentHour = new Date().getHours();
     let caloriesBurned = 0;
+    
     for (let h = 0; h < currentHour; h++) {
       caloriesBurned += caloriesForHour(hourlySteps[h] || 0, weightKg, heightCm, bmrPerHour);
     }
+    
     // Current hour uses measured speed from rolling window
     caloriesBurned += caloriesForHour(
       hourlySteps[currentHour] || 0,
