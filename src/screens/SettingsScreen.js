@@ -11,6 +11,16 @@ const WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 const isWeb = Platform.OS === "web";
 
 export default function SettingsScreen() {
+
+  // Helper to show alert on web and native platform safely
+  const showAlert = (title, message) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
   const { user, profile, signOut } = useAuth();
   const [fitnessToken, setFitnessToken] = useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -31,18 +41,44 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  async function handleSyncWithToken(token) {
+async function handleSyncWithToken(token) {
     if (!token || !user) return;
     setSyncing(true);
     try {
-      const data = await fetchGoogleFitnessToday(token, profile?.weightKg, profile?.heightCm);
-      await setDayActivity(user.uid, todayKey(), { steps: data.steps, caloriesBurned: data.caloriesBurned, distanceKm: data.distanceKm });
+      // 1. Pass user.uid as the final parameter so Google Health Service can save to Firestore
+      const data = await fetchGoogleFitnessToday(
+        token, 
+        profile?.weightKg, 
+        profile?.heightCm,
+        profile?.age || 30, // Pass fallback age if missing
+        profile?.sex || "male", // Pass fallback sex if missing
+        user.uid // <--- CRITICAL: Pass the authenticated user.uid here
+      );
+
+      // 2. Include activeCalories and hourlySteps in your local database update
+      await setDayActivity(user.uid, todayKey(), { 
+        steps: data.steps, 
+        caloriesBurned: data.caloriesBurned, 
+        activeCalories: data.activeCalories, // <-- Added
+        distanceKm: data.distanceKm,
+        hourlySteps: data.hourlySteps // <-- Added
+      });
+
       setLastSynced(new Date().toLocaleTimeString());
-      Alert.alert("Synced!", `Steps: ${data.steps.toLocaleString()}\nCalories burned: ${data.caloriesBurned} kcal\nDistance: ${data.distanceKm} km\n\nGo back to Today tab to see updated data.`);
+
+      // 3. Update the alert to show the calculated active calorie burn
+      showAlert(
+        "Synced!", 
+        `Steps: ${data.steps.toLocaleString()}\n` +
+        `Active Burn: ${data.activeCalories} kcal\n` + // <-- Added
+        `Total Burn: ${data.caloriesBurned} kcal\n` +
+        `Distance: ${data.distanceKm} km\n\n` +
+        `Go back to Today tab to see updated data.`
+      );
     } catch (e) {
       clearAccessToken();
       setFitnessToken(null);
-      Alert.alert("Sync failed", e.message || "Could not fetch fitness data. Please reconnect.");
+      showAlert("Sync failed", e.message || "Could not fetch fitness data. Please reconnect.");
     } finally {
       setSyncing(false);
     }
@@ -50,10 +86,10 @@ export default function SettingsScreen() {
 
   function connectGoogleHealth() {
     if (!isWeb) {
-      Alert.alert("Web Only", "Google Health sync is available on the web link only. Open the app in your browser to use this feature.");
+      showAlert("Web Only", "Google Health sync is available on the web link only. Open the app in your browser to use this feature.");
       return;
     }
-    const redirectUri = window.location.origin + window.location.pathname;
+    const redirectUri = window.location.origin + '/';
     const url = buildGoogleFitnessAuthUrl(WEB_CLIENT_ID, redirectUri);
     window.location.href = url;
   }
@@ -62,14 +98,20 @@ export default function SettingsScreen() {
     clearAccessToken();
     setFitnessToken(null);
     setLastSynced(null);
-    Alert.alert("Disconnected", "Google Health sync has been disconnected.");
+    showAlert("Disconnected", "Google Health sync has been disconnected.");
   }
 
   function confirmSignOut() {
-    Alert.alert("Sign out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign Out", style: "destructive", onPress: signOut },
-    ]);
+    if (Platform.OS === 'web') {
+      if (window.confirm("Are you sure you want to sign out?")) {
+        signOut();
+      }
+    } else {
+      Alert.alert("Sign out", "Are you sure you want to sign out?", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Sign Out", style: "destructive", onPress: signOut },
+      ]);
+    }
   }
 
   return (

@@ -65,18 +65,27 @@ export default function TrendBarChart({ data, height = 180 }) {
   const chartW = width - paddingLeft - 12;
   const chartH = height - paddingTop - paddingBottom;
 
+  // Defensive coercion: ensure burned/consumed are valid non-negative numbers
+  const safeData = data.map((d) => ({
+    ...d,
+    burned: Math.max(0, isFinite(Number(d.burned)) ? Number(d.burned) : 0),
+    consumed: Math.max(0, isFinite(Number(d.consumed)) ? Number(d.consumed) : 0),
+  }));
+
   const maxVal = Math.max(
-    ...data.map((d) => Math.max(d.burned, d.consumed)),
+    ...safeData.map((d) => Math.max(d.burned, d.consumed)),
     100
   );
   const niceMax = Math.ceil(maxVal / 500) * 500;
 
-  const groupW = chartW / data.length;
+  const groupW = chartW / safeData.length;
   const barW = Math.min(14, groupW * 0.28);
   const gap = 4;
 
+  // Clamp value to [0, niceMax] before computing Y so bar heights never go negative
   function yFor(v) {
-    return paddingTop + chartH - (v / niceMax) * chartH;
+    const clamped = Math.max(0, Math.min(niceMax, v));
+    return paddingTop + chartH - (clamped / niceMax) * chartH;
   }
 
   return (
@@ -102,30 +111,37 @@ export default function TrendBarChart({ data, height = 180 }) {
           {niceMax >= 1000 ? `${(niceMax / 1000).toFixed(1)}k` : niceMax}
         </SvgText>
 
-        {data.map((d, i) => {
+        {safeData.map((d, i) => {
           const groupX = paddingLeft + i * groupW + groupW / 2;
           const burnedX = groupX - barW - gap / 2;
           const consumedX = groupX + gap / 2;
           const burnedY = yFor(d.burned);
           const consumedY = yFor(d.consumed);
+          // Always clamp heights >= 0 to prevent SVG crash on iOS
+          const burnedH = Math.max(0, paddingTop + chartH - burnedY);
+          const consumedH = Math.max(0, paddingTop + chartH - consumedY);
           return (
             <React.Fragment key={i}>
-              <Rect
-                x={burnedX}
-                y={burnedY}
-                width={barW}
-                height={paddingTop + chartH - burnedY}
-                rx={3}
-                fill={theme.colors.primary}
-              />
-              <Rect
-                x={consumedX}
-                y={consumedY}
-                width={barW}
-                height={paddingTop + chartH - consumedY}
-                rx={3}
-                fill={theme.colors.accentWarn}
-              />
+              {burnedH > 0 && (
+                <Rect
+                  x={burnedX}
+                  y={burnedY}
+                  width={barW}
+                  height={burnedH}
+                  rx={3}
+                  fill={theme.colors.primary}
+                />
+              )}
+              {consumedH > 0 && (
+                <Rect
+                  x={consumedX}
+                  y={consumedY}
+                  width={barW}
+                  height={consumedH}
+                  rx={3}
+                  fill={theme.colors.accentWarn}
+                />
+              )}
               <SvgText
                 x={groupX}
                 y={height - 8}

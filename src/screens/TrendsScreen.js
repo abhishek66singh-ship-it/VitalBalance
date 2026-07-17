@@ -14,8 +14,13 @@ const RANGE_OPTIONS = [
   { id: "month", label: "Monthly", days: 30 },
 ];
 
+// Guard: only sum items that are genuine food log objects (not stale number arrays
+// left over from the food-log overwrite bug that has since been fixed).
 function consumedFor(log) {
-  return (log.items || []).reduce((s, i) => s + i.kcal, 0);
+  return (log.items || []).reduce((s, i) => {
+    if (typeof i !== "object" || i === null || typeof i.kcal !== "number") return s;
+    return s + i.kcal;
+  }, 0);
 }
 
 function formatShortDate(dateKey, granularity) {

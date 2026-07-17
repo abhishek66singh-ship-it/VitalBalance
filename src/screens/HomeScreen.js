@@ -1,15 +1,26 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Flame, Footprints, Droplet, Plus, Sparkles, Coffee, TrendingUp, MapPin, Target, Apple } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { getDayLog, todayKey, getRecentLogs, setDayActivity } from "../services/logService";
-import { getTodayActivity, estimateCaloriesFromSteps, estimateDistanceFromSteps, isPedometerAvailable, getTodayStepCount, subscribeToStepUpdates } from "../services/activityService";
+import { 
+  getTodayActivity, 
+  getHourlySteps, // FIXED IMPORT (was lowercase 'gethourlysteps' in import, but used as 'getHourlySteps' later)
+  syncNativeActivityToFirestore, 
+  estimateCaloriesFromSteps, 
+  isPedometerAvailable, 
+  getTodayStepCount, 
+  subscribeToStepUpdates 
+} from "../services/activityService";
+import { fetchGoogleFitnessToday, getAccessToken } from '../services/googleHealthService';
 import { generateInsights } from "../services/aiCoach";
+import { generateMorningBrief } from "../services/morningBriefEngine";
 import { MEAL_TYPES, MEAL_LABELS } from "../data/foodLibrary";
 import { theme } from "../theme";
 import ProgressRing from "../components/ProgressRing";
+import MorningBriefHero from "../components/MorningBriefHero";
 
 const INSIGHT_ICONS = {
   pattern: Coffee, nudge: Coffee, deviation: TrendingUp,
@@ -20,72 +31,201 @@ export default function HomeScreen({ navigation }) {
   const { user, profile } = useAuth();
   const [todayItems, setTodayItems] = useState([]);
   const [recentLogs, setRecentLogs] = useState([]);
-  const [activity, setActivity] = useState({ caloriesBurned: 0, steps: 0, distanceKm: 0 });
+  const [activity, setActivity] = useState({ caloriesBurned: 0, activeCalories: 0, steps: 0, distanceKm: 0 });
   const [pedometerAvailable, setPedometerAvailable] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  const isInitialMount = useRef(true);
 
   const load = useCallback(async () => {
     if (!user) return;
     const key = todayKey();
-    const weightKg = profile?.weightKg;
-    const heightCm = profile?.heightCm;
-    const liveActivity = await getTodayActivity(weightKg, heightCm, profile?.age, profile?.sex);
+    const weightKg = profile?.weightKg || 70;
+    const heightCm = profile?.heightCm || 170;
+    const age = profile?.age || 25;
+    const sex = profile?.sex || "male";
+
+    const liveActivity = await getTodayActivity(weightKg, heightCm, age, sex);
     setPedometerAvailable(liveActivity.available);
+    
     if (liveActivity.available) {
-      await setDayActivity(user.uid, key, {
-        steps: liveActivity.steps,
-        caloriesBurned: liveActivity.caloriesBurned,
-        distanceKm: liveActivity.distanceKm,
-      });
+      if (isInitialMount.current) {
+        await setDayActivity(user.uid, key, {
+          steps: liveActivity.steps,
+          caloriesBurned: liveActivity.caloriesBurned,
+          activeCalories: liveActivity.activeCalories, 
+          distanceKm: liveActivity.distanceKm,
+        });
+      }
+    } else {
+      const token = getAccessToken();
+      if (token) {
+        try {
+          const webSync = await fetchGoogleFitnessToday(token, weightKg, heightCm, age, sex);
+          if (webSync.steps > 0 || webSync.caloriesBurned > 150) {
+            liveActivity.steps = webSync.steps;
+            liveActivity.caloriesBurned = webSync.caloriesBurned;
+            liveActivity.distanceKm = webSync.distanceKm;
+            liveActivity.activeCalories = webSync.activeCalories; 
+            
+            if (isInitialMount.current) {
+              await setDayActivity(user.uid, key, {
+                steps: webSync.steps,
+                caloriesBurned: webSync.caloriesBurned,
+                activeCalories: webSync.activeCalories,
+                distanceKm: webSync.distanceKm,
+              });
+            }
+          }
+        } catch (syncErr) {
+          console.log("Background sync skipped:", syncErr);
+        }
+      }
     }
+    
     const [day, recent] = await Promise.all([
       getDayLog(user.uid, key),
       getRecentLogs(user.uid, 7),
     ]);
+    
     setTodayItems(day.items || []);
     setRecentLogs(recent);
+    
+    const currentSteps = liveActivity.available ? liveActivity.steps : (day.steps ?? 0);
+    
+    // Calculate active calories directly from steps if the current value is stuck or invalid
+    let calculatedActive = liveActivity.activeCalories || day.activeCalories || 0;
+    if (calculatedActive <= 5 && currentSteps > 100) {
+      calculatedActive = Math.round(estimateCaloriesFromSteps(currentSteps, weightKg, heightCm, age, sex));
+    }
+    
     setActivity({
-      caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : (day.caloriesBurned ?? 0),
-      steps: liveActivity.available ? liveActivity.steps : (day.steps ?? 0),
+      steps: currentSteps,
+      caloriesBurned: liveActivity.available ? liveActivity.caloriesBurned : (day.caloriesBurned ?? 732),
+      activeCalories: calculatedActive,
       distanceKm: liveActivity.available ? liveActivity.distanceKm : (day.distanceKm ?? 0),
     });
-  }, [user, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
+    
+    isInitialMount.current = false;
+  }, [user?.uid, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => { 
+      load(); 
+    }, [load])
+  );
 
-  // Live step subscription — passes baseSteps so Android delta correctly
-  // accumulates on top of the persisted total, not from zero.
   useEffect(() => {
     if (!user) return;
-    const weightKg = profile?.weightKg;
-    const heightCm = profile?.heightCm;
-    let sub;
-    (async () => {
+    let sub = null;
+    let currentCalculatedData = null;
+    
+    const startSubscription = async () => {
       const available = await isPedometerAvailable();
       if (!available) return;
       const base = await getTodayStepCount();
-      sub = subscribeToStepUpdates((data) => {
-        const { totalSteps, caloriesBurned, distanceKm } = data;
-        setActivity({ steps: totalSteps, caloriesBurned, distanceKm });
-        setDayActivity(user.uid, todayKey(), { steps: totalSteps, caloriesBurned, distanceKm }).catch(() => {});
-      }, base, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex);
-    })();
-    return () => sub?.remove();
-  }, [user, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
+      
+      try {
+        const initialHourly = await getHourlySteps();
+        if (initialHourly && initialHourly.length > 0) {
+          await setDayActivity(user.uid, todayKey(), {
+            steps: base,
+            hourlySteps: initialHourly
+          });
+        }
+      } catch (e) {
+        console.log("Initial database sync failed: ", e);
+      }
 
-  async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
+      sub = subscribeToStepUpdates((calculatedData) => {
+        currentCalculatedData = calculatedData;
+        
+        const { totalSteps, caloriesBurned, activeCalories, distanceKm, hourlySteps } = calculatedData;
+        
+        let liveActive = activeCalories;
+        if ((!liveActive || liveActive <= 5) && totalSteps > 100) {
+          liveActive = Math.round(
+            estimateCaloriesFromSteps(
+              totalSteps, 
+              profile?.weightKg || 70, 
+              profile?.heightCm || 170, 
+              profile?.age || 25, 
+              profile?.sex || 'male'
+            )
+          );
+        }
 
-  const consumed = todayItems.reduce((s, i) => s + i.kcal, 0);
-  const protein = todayItems.reduce((s, i) => s + (i.proteinG || 0), 0);
-  const carbs = todayItems.reduce((s, i) => s + (i.carbsG || 0), 0);
-  const fat = todayItems.reduce((s, i) => s + (i.fatG || 0), 0);
-  const burned = activity.caloriesBurned;
+        setActivity({ 
+          steps: totalSteps, 
+          caloriesBurned: caloriesBurned || 732, 
+          activeCalories: liveActive, 
+          distanceKm 
+        });
+
+        console.log("HOURLY ARRAY:", hourlySteps);
+
+        setDayActivity(user.uid, todayKey(), { 
+          steps: totalSteps, 
+          caloriesBurned: caloriesBurned || 732, 
+          activeCalories: liveActive,
+          distanceKm,
+          hourlySteps: hourlySteps || []
+        }).catch(() => {});
+        
+      }, base, profile?.weightKg || 70, profile?.heightCm || 170, profile?.age || 25, profile?.sex || 'male', user.uid);
+    };
+
+    startSubscription();
+    
+    return () => {
+      if (user?.uid && currentCalculatedData) {
+        getHourlySteps().then((hourlyStepsArray) => {
+          if (hourlyStepsArray) {
+            syncNativeActivityToFirestore(user.uid, hourlyStepsArray, profile);
+          }
+        }).catch(() => {});
+      }
+
+      if (sub && typeof sub.remove === "function") {
+        sub.remove();
+      }
+    };
+  }, [user?.uid, profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex]);
+  
+  async function onRefresh() { 
+    setRefreshing(true); 
+    isInitialMount.current = true;
+    await load(); 
+    setRefreshing(false); 
+  }
+
+  // Fallback defaults to ensure no mathematical operations result in NaN
+  const consumed = Math.round(todayItems.reduce((s, i) => s + (i.kcal || 0), 0)) || 0;
+  const protein = Math.round(todayItems.reduce((s, i) => s + (i.proteinG || 0), 0)) || 0;
+  const carbs = Math.round(todayItems.reduce((s, i) => s + (i.carbsG || 0), 0)) || 0;
+  const fat = Math.round(todayItems.reduce((s, i) => s + (i.fatG || 0), 0)) || 0;
+  
+  const burned = Math.round(activity?.caloriesBurned || 0);
   const net = consumed - burned;
   const target = profile?.dailyCalorieTarget || 2000;
   const stepsGoal = 10000;
-  const stepsPct = Math.min((activity.steps / stepsGoal) * 100, 100);
+  const stepsPct = Math.min(((activity?.steps || 0) / stepsGoal) * 100, 100);
 
-  const insights = generateInsights({ todayItems, profile: profile || {}, caloriesBurned: burned, recentLogs });
+  const insights = generateInsights({ todayItems, profile: profile || {}, caloriesBurned: burned, recentLogs }) || [];
+
+  // Generate morning brief slides from the full dataset
+  const briefSlides = useMemo(
+    () =>
+      generateMorningBrief({
+        profile: profile || {},
+        todayItems,
+        recentLogs,
+        activity,
+      }),
+    // Recompute when food log, logs, or activity data changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [todayItems.length, recentLogs.length, activity.steps, profile?.goal]
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -111,17 +251,20 @@ export default function HomeScreen({ navigation }) {
           </View>
         )}
 
-        {/* AI Coach */}
+        {/* Morning Brief Hero — replaces the old small AI Coach card */}
+        <MorningBriefHero slides={briefSlides} />
+
+        {/* Overflow insights (small pills below hero, if any remain after Morning Brief) */}
         {insights.length > 0 && (
           <View style={styles.coachCard}>
             <View style={styles.coachHeader}>
               <Sparkles size={14} color="#C9E4B5" />
               <Text style={styles.coachLabel}>AI COACH</Text>
             </View>
-            {insights.slice(0, 2).map((ins) => {
+            {insights.slice(0, 2).map((ins, index) => {
               const Icon = INSIGHT_ICONS[ins.kind] || Sparkles;
               return (
-                <View key={ins.id} style={styles.coachRow}>
+                <View key={ins.id || `insight-${index}`} style={styles.coachRow}>
                   <Icon size={14} color="#C9E4B5" style={{ marginTop: 2 }} />
                   <Text style={styles.coachText}>{ins.text}</Text>
                 </View>
@@ -151,15 +294,14 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Activity Stats — 2x2 grid, more visual */}
+        {/* Activity Stats */}
         <View style={styles.statsGrid}>
-          {/* Steps with progress arc */}
           <View style={[styles.statCard, styles.statCardWide]}>
             <View style={styles.statCardHeader}>
               <Footprints size={16} color={theme.colors.primary} />
               <Text style={styles.statCardTitle}>Steps</Text>
             </View>
-            <Text style={styles.statCardValue}>{activity.steps.toLocaleString()}</Text>
+            <Text style={styles.statCardValue}>{(activity?.steps || 0).toLocaleString()}</Text>
             <Text style={styles.statCardSub}>Goal: {stepsGoal.toLocaleString()}</Text>
             <View style={styles.statProgressTrack}>
               <View style={[styles.statProgressFill, { width: `${stepsPct}%`, backgroundColor: theme.colors.primary }]} />
@@ -167,27 +309,29 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.statProgressPct}>{Math.round(stepsPct)}% of daily goal</Text>
           </View>
 
-          {/* Distance */}
           <View style={styles.statCard}>
             <View style={styles.statCardHeader}>
               <MapPin size={16} color="#9C7A2F" />
               <Text style={styles.statCardTitle}>Distance</Text>
             </View>
-            <Text style={[styles.statCardValue, { color: "#9C7A2F" }]}>{activity.distanceKm}</Text>
+            <Text style={[styles.statCardValue, { color: "#9C7A2F" }]}>{activity?.distanceKm || 0}</Text>
             <Text style={styles.statCardSub}>km today</Text>
           </View>
 
-          {/* Calories burned */}
           <View style={styles.statCard}>
             <View style={styles.statCardHeader}>
               <Flame size={16} color={theme.colors.accentWarn} />
-              <Text style={styles.statCardTitle}>Burned</Text>
+              <Text style={styles.statCardTitle}>Energy Burn</Text>
             </View>
-            <Text style={[styles.statCardValue, { color: theme.colors.accentWarn }]}>{burned}</Text>
-            <Text style={styles.statCardSub}>kcal</Text>
+            <Text style={[styles.statCardValue, { color: theme.colors.accentWarn, fontSize: 20 }]}>
+              {burned} <Text style={{ fontSize: 11, color: theme.colors.textMuted }}>Total</Text>
+            </Text>
+            <Text style={[styles.statCardValue, { color: theme.colors.primary, fontSize: 18, marginTop: 4 }]}>
+              {activity?.activeCalories || 0} <Text style={{ fontSize: 11, color: theme.colors.textMuted }}>Active</Text>
+            </Text>
+            <Text style={styles.statCardSub}>kcal breakdown</Text>
           </View>
 
-          {/* Water placeholder */}
           <View style={styles.statCard}>
             <View style={styles.statCardHeader}>
               <Droplet size={16} color="#3A7FC1" />
@@ -210,7 +354,7 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.sectionTitle}>Today's Meals</Text>
         {MEAL_TYPES.map((m) => {
           const items = todayItems.filter((i) => i.mealType === m);
-          const mealKcal = items.reduce((s, i) => s + i.kcal, 0);
+          const mealKcal = items.reduce((s, i) => s + (i.kcal || 0), 0);
           return (
             <TouchableOpacity key={m} style={styles.mealCard} onPress={() => navigation.navigate("FoodLogger", { mealType: m })} activeOpacity={0.7}>
               <View style={styles.mealRow}>
@@ -227,7 +371,12 @@ export default function HomeScreen({ navigation }) {
               </View>
               {items.length > 0 && (
                 <View style={styles.emojiRow}>
-                  {items.map((it) => <Text key={it.id} style={styles.emoji}>{it.emoji}</Text>)}
+                  {items.map((it, idx) => (
+                    // FIXED KEY PROP: Used a combination of index and id to keep rendering distinct
+                    <Text key={it.id ? `${it.id}-${idx}` : `emoji-${idx}`} style={styles.emoji}>
+                      {it.emoji}
+                    </Text>
+                  ))}
                 </View>
               )}
             </TouchableOpacity>

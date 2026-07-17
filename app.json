@@ -44,7 +44,8 @@
         {
           "motionPermission": "VitalBalance uses your phone's motion sensor to count your steps and estimate calories burned throughout the day."
         }
-      ]
+      ],
+      "react-native-health-connect"
     ],
     "extra": {
       "eas": {

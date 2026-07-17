@@ -77,6 +77,23 @@ export async function removeLoggedItem(uid, dateKey, itemId) {
   return items;
 }
 
+export async function updateLoggedItem(uid, dateKey, itemId, updatedFields) {
+  const current = await getDayLog(uid, dateKey);
+  const items = (current.items || []).map((i) => {
+    if (i.id === itemId) {
+      return { ...i, ...updatedFields };
+    }
+    return i;
+  });
+  const ref = doc(db, "users", uid, "logs", dateKey);
+  await setDoc(
+    ref,
+    { date: dateKey, items, updatedAt: new Date().toISOString() },
+    { merge: true }
+  );
+  return items;
+}
+
 export async function getRecentLogs(uid, days = 7) {
   const ref = collection(db, "users", uid, "logs");
   const q = query(ref, orderBy("date", "desc"), fbLimit(days));
@@ -87,21 +104,30 @@ export async function getRecentLogs(uid, days = 7) {
 // Writes/updates the calories-burned (+ optional steps) value for a given day.
 // Currently called with the mocked activity value from HomeScreen — swap point
 // for real Apple Health / Google Fit / Fitbit sync later (FR-1.1-1.3).
-export async function setDayActivity(uid, dateKey, { caloriesBurned, steps, distanceKm } = {}) {
+
+export async function setDayActivity(uid, dateKey, { caloriesBurned, steps, distanceKm, hourlySteps } = {}) {
   const ref = doc(db, "users", uid, "logs", dateKey);
   const current = await getDayLog(uid, dateKey);
-  await setDoc(
-    ref,
-    {
-      date: dateKey,
-      items: current.items || [],
-      caloriesBurned: caloriesBurned ?? current.caloriesBurned ?? 0,
-      steps: steps ?? current.steps ?? 0,
-      distanceKm: distanceKm ?? current.distanceKm ?? 0,
-      updatedAt: new Date().toISOString(),
-    },
-    { merge: true }
-  );
+
+  // IMPORTANT: food log `items` are NEVER touched here — they are written
+  // exclusively by addLoggedItem / removeLoggedItem. Activity updates only
+  // write activity-specific fields so food entries are never overwritten.
+  const payload = {
+    date: dateKey,
+    // Preserve existing food items — do NOT overwrite with step arrays
+    items: current.items || [],
+    caloriesBurned: caloriesBurned ?? current.caloriesBurned ?? 0,
+    steps: steps ?? current.steps ?? 0,
+    distanceKm: distanceKm ?? current.distanceKm ?? 0,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Store hourly step breakdown in its own dedicated field (separate from food items)
+  if (hourlySteps && Array.isArray(hourlySteps)) {
+    payload.hourlySteps = hourlySteps;
+  }
+
+  await setDoc(ref, payload, { merge: true });
 }
 
 // --- Favorite meals (FR-2.7) ---

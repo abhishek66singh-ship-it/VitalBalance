@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Platform, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, ActivityIndicator, Platform, RefreshControl, TextInput, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Flame, Footprints, MapPin, TrendingUp, TrendingDown, Sparkles, Apple, Zap, RefreshCw } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
-import { getDayLog, todayKey } from "../services/logService";
+import { getDayLog, todayKey, removeLoggedItem, updateLoggedItem } from "../services/logService";
 import { getTodayActivity } from "../services/activityService";
+import { FOOD_LIBRARY } from "../data/foodLibrary";
 import { theme } from "../theme";
 
 function getDatesArray(count = 30) {
@@ -109,6 +110,82 @@ export default function DailyReportScreen() {
   const [liveActivity, setLiveActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [editGrams, setEditGrams] = useState("");
+  const [editIsUnitBased, setEditIsUnitBased] = useState(false);
+  const [unitLabel, setUnitLabel] = useState("g");
+  const [unitGramsValue, setUnitGramsValue] = useState(1);
+
+  const startEdit = (item) => {
+    setEditingItem(item);
+    
+    // Find the food item from the library to see if it is unit-based
+    const libraryFood = FOOD_LIBRARY.find(f => f.id === item.foodId);
+    if (libraryFood && libraryFood.unitGrams && libraryFood.unitLabel) {
+      // Calculate original logged units (e.g. 120g / 40g = 3)
+      const qty = Math.round((item.grams || libraryFood.unitGrams) / libraryFood.unitGrams);
+      setEditGrams(String(qty));
+      setEditIsUnitBased(true);
+      setUnitLabel(libraryFood.unitLabel);
+      setUnitGramsValue(libraryFood.unitGrams);
+    } else {
+      setEditGrams(String(item.grams || 100));
+      setEditIsUnitBased(false);
+      setUnitLabel("g");
+      setUnitGramsValue(1);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingItem || !user) return;
+    const inputVal = parseFloat(editGrams);
+    if (isNaN(inputVal) || inputVal <= 0) {
+      alert(editIsUnitBased ? "Please enter a valid quantity." : "Please enter a valid weight in grams.");
+      return;
+    }
+
+    const newGrams = editIsUnitBased ? inputVal * unitGramsValue : inputVal;
+    const oldGrams = editingItem.grams || 100;
+    const ratio = newGrams / oldGrams;
+
+    const newPortionLabel = editIsUnitBased
+      ? `${inputVal} ${unitLabel}${inputVal > 1 ? (unitLabel.endsWith("s") ? "" : "s") : ""}`
+      : `${newGrams} g`;
+
+    const updatedFields = {
+      grams: newGrams,
+      kcal: Math.round(editingItem.kcal * ratio),
+      proteinG: Math.round((editingItem.proteinG || 0) * ratio * 10) / 10,
+      carbsG: Math.round((editingItem.carbsG || 0) * ratio * 10) / 10,
+      fatG: Math.round((editingItem.fatG || 0) * ratio * 10) / 10,
+      portionLabel: newPortionLabel
+    };
+
+    setLoading(true);
+    try {
+      const updatedItems = await updateLoggedItem(user.uid, selectedDate, editingItem.id, updatedFields);
+      setLog(prev => ({ ...prev, items: updatedItems }));
+      setEditingItem(null);
+    } catch (e) {
+      alert("Error saving: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteItem = async () => {
+    if (!editingItem || !user) return;
+    setLoading(true);
+    try {
+      const updatedItems = await removeLoggedItem(user.uid, selectedDate, editingItem.id);
+      setLog(prev => ({ ...prev, items: updatedItems }));
+      setEditingItem(null);
+    } catch (e) {
+      alert("Error deleting: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -116,8 +193,6 @@ export default function DailyReportScreen() {
     try {
       const data = await getDayLog(user.uid, selectedDate);
       setLog(data);
-      // For today: also fetch live activity data from the sensor
-      // so Report matches the dashboard exactly (not stale Firestore data)
       if (selectedDate === todayDateKey) {
         const live = await getTodayActivity(profile?.weightKg, profile?.heightCm, profile?.age, profile?.sex);
         if (live.available) setLiveActivity(live);
@@ -138,14 +213,16 @@ export default function DailyReportScreen() {
     setRefreshing(false);
   }
 
-  const items = log?.items || [];
-  const consumed = items.reduce((s, i) => s + i.kcal, 0);
+  // Filter out any empty, uninitialized, or invalid food items
+  const items = useMemo(() => {
+    return (log?.items || []).filter(item => item && item.name && typeof item.kcal === "number");
+  }, [log]);
+
+  const consumed = items.reduce((s, i) => s + (i.kcal || 0), 0);
   const protein = items.reduce((s, i) => s + (i.proteinG || 0), 0);
   const carbs = items.reduce((s, i) => s + (i.carbsG || 0), 0);
   const fat = items.reduce((s, i) => s + (i.fatG || 0), 0);
 
-  // For today: use live sensor data (matches dashboard exactly)
-  // For past dates: use Firestore data (what was recorded that day)
   const burned = liveActivity?.caloriesBurned ?? log?.caloriesBurned ?? 0;
   const steps = liveActivity?.steps ?? log?.steps ?? 0;
   const distanceKm = liveActivity?.distanceKm ?? log?.distanceKm ?? 0;
@@ -156,7 +233,7 @@ export default function DailyReportScreen() {
   const fatGoal = profile?.fatTargetG || 60;
   const calorieTarget = profile?.dailyCalorieTarget || 2000;
 
-  const aiInsights = useMemo(() => generateAIReport({ consumed, burned, protein, carbs, fat, steps, proteinGoal, carbsGoal, fatGoal, calorieTarget }), [log]);
+  const aiInsights = useMemo(() => generateAIReport({ consumed, burned, protein, carbs, fat, steps, proteinGoal, carbsGoal, fatGoal, calorieTarget }), [consumed, burned, protein, carbs, fat, steps, proteinGoal, carbsGoal, fatGoal, calorieTarget]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -170,7 +247,6 @@ export default function DailyReportScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Horizontal date scroller */}
       <FlatList
         data={dates}
         horizontal
@@ -273,17 +349,22 @@ export default function DailyReportScreen() {
           {/* Food logged */}
           {items.length > 0 && (
             <>
-              <Text style={styles.sectionTitle}>Food Logged</Text>
+              <Text style={styles.sectionTitle}>Food Logged (Tap to edit/delete)</Text>
               <View style={styles.foodLogCard}>
                 {items.map((item, i) => (
-                  <View key={item.id} style={[styles.foodLogRow, i < items.length - 1 && styles.foodLogDivider]}>
-                    <Text style={styles.foodEmoji}>{item.emoji}</Text>
+                  <TouchableOpacity
+                    key={item.id ? `${item.id}-${i}` : `food-item-${i}`}
+                    style={[styles.foodLogRow, i < items.length - 1 && styles.foodLogDivider]}
+                    onPress={() => startEdit(item)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.foodEmoji}>{item.emoji || "🍽️"}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.foodName}>{item.name}{item.variant ? ` (${item.variant})` : ""}</Text>
-                      <Text style={styles.foodSub}>{item.portionLabel} · {item.mealType}</Text>
+                      <Text style={styles.foodSub}>{item.portionLabel || "1 Serving"} · {item.mealType || "Snack"}</Text>
                     </View>
                     <Text style={styles.foodKcal}>{item.kcal} kcal</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             </>
@@ -306,6 +387,63 @@ export default function DailyReportScreen() {
 
         </ScrollView>
       )}
+
+      {/* Edit/Delete Food Modal */}
+      <Modal
+        visible={editingItem !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingItem(null)}
+      >
+        <View style={styles.modalOverlay}>
+          {editingItem && (
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalEmoji}>{editingItem.emoji || "🍽️"}</Text>
+                <Text style={styles.modalTitle}>{editingItem.name}{editingItem.variant ? ` (${editingItem.variant})` : ""}</Text>
+                <Text style={styles.modalSubtitle}>{editingItem.mealType} · entered as {editingItem.portionLabel}</Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>
+                  {editIsUnitBased ? `Quantity (${unitLabel}${parseFloat(editGrams) > 1 ? "s" : ""})` : "Weight (grams)"}
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editGrams}
+                  onChangeText={setEditGrams}
+                  keyboardType="numeric"
+                  placeholder={editIsUnitBased ? "1" : "100"}
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalBtnDelete]}
+                  onPress={handleDeleteItem}
+                >
+                  <Text style={{ color: "#BA1A1A", fontWeight: "700" }}>Delete</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalBtnCancel]}
+                  onPress={() => setEditingItem(null)}
+                >
+                  <Text style={{ color: theme.colors.textSubtle, fontWeight: "700" }}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalBtnSave]}
+                  onPress={handleSaveEdit}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -370,4 +508,90 @@ const styles = StyleSheet.create({
   aiRowDivider: { borderBottomWidth: 1, borderBottomColor: "#ffffff15" },
   aiIcon: { fontSize: 16 },
   aiText: { flex: 1, fontSize: 13, lineHeight: 19, color: "#EFEAE0" },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalEmoji: {
+    fontSize: 40,
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: theme.colors.text,
+    fontFamily: theme.fonts.display,
+    textAlign: "center",
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: 4,
+    textTransform: "capitalize",
+  },
+  inputGroup: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.colors.textSubtle,
+    marginBottom: 6,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.background,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBtnCancel: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  modalBtnSave: {
+    backgroundColor: theme.colors.primary,
+  },
+  modalBtnDelete: {
+    backgroundColor: "#FCE8E6",
+    borderWidth: 1,
+    borderColor: "#F5C2C0",
+  },
 });

@@ -19,7 +19,7 @@ if (isNative) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Mifflin-St Jeor BMR (kcal/day)
-function calculateBMR(weightKg, heightCm, age, sex) {
+export function calculateBMR(weightKg, heightCm, age, sex) {
   const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
   return sex === "male" ? base + 5 : base - 161;
 }
@@ -108,7 +108,7 @@ function movementPremium(steps, weightKg, heightCm, measuredSpeed_ms = null) {
 }
 
 // Total calories for one hour
-function caloriesForHour(steps, weightKg, heightCm, bmrPerHour, measuredSpeed_ms = null) {
+export function caloriesForHour(steps, weightKg, heightCm, bmrPerHour, measuredSpeed_ms = null) {
   return bmrPerHour + movementPremium(steps, weightKg, heightCm, measuredSpeed_ms);
 }
 
@@ -116,11 +116,24 @@ function caloriesForHour(steps, weightKg, heightCm, bmrPerHour, measuredSpeed_ms
 export function calculateDayCalories(hourlySteps, weightKg, heightCm, age, sex) {
   const bmr = calculateBMR(weightKg, heightCm, age, sex);
   const bmrPerHour = bmr / 24;
+
+  const now = new Date();
   const currentHour = new Date().getHours();
+  const currentMinutes = now.getMinutes();
+
   let total = 0;
   for (let h = 0; h <= currentHour; h++) {
     total += caloriesForHour(hourlySteps[h] || 0, weightKg, heightCm, bmrPerHour);
   }
+
+// Handle the current hour proportionally by minutes
+  const currentHourTotalPotential = caloriesForHour(hourlySteps[currentHour] || 0, weightKg, heightCm, bmrPerHour);
+  const currentHourActiveComponent = currentHourTotalPotential - bmrPerHour;
+  
+  // Charge BMR only for the exact minutes passed + full movement premium earned
+  const currentHourProportionalBmr = bmrPerHour * (currentMinutes / 60);
+  total += currentHourProportionalBmr + currentHourActiveComponent;
+
   return Math.round(total);
 }
 
@@ -134,36 +147,75 @@ const STEPS_TOTAL_KEY = "vb_steps_total";
 
 function todayString() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
-async function getHourlySteps() {
+export async function getHourlySteps() {
   try {
     const savedDate = await AsyncStorage.getItem(STEPS_DATE_KEY);
     if (savedDate !== todayString()) {
-      const fresh = new Array(24).fill(0);
+      const fresh = [];
+      for (let i = 0; i < 24; i++) fresh.push(0);
       await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
       await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(fresh));
       await AsyncStorage.setItem(STEPS_TOTAL_KEY, "0");
       return fresh;
     }
     const saved = await AsyncStorage.getItem(STEPS_HOURLY_KEY);
-    return saved ? JSON.parse(saved) : new Array(24).fill(0);
-  } catch { return new Array(24).fill(0); }
+    if (saved) {
+      return JSON.parse(saved);
+    } else {
+      const fresh = [];
+      for (let i = 0; i < 24; i++) fresh.push(0);
+      return fresh;
+    }
+  } catch (err) { 
+    const fresh = [];
+    for (let i = 0; i < 24; i++) fresh.push(0);
+    return fresh;
+  }
 }
 
 async function updateHourlySteps(totalSteps) {
   try {
-    const hourly = await getHourlySteps();
-    const prevTotal = hourly.reduce((a, b) => a + b, 0);
-    const delta = Math.max(0, totalSteps - prevTotal);
+    const today = todayString();
+    const savedDate = await AsyncStorage.getItem(STEPS_DATE_KEY);
+    let hourly = await getHourlySteps();
+
+    // 1. If it's a new day, force a clean reset of everything
+    if (savedDate !== today) {
+      hourly = Array(24).fill(0);
+      await AsyncStorage.setItem(STEPS_DATE_KEY, today);
+      await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourly));
+      await AsyncStorage.setItem(STEPS_TOTAL_KEY, String(totalSteps)); // Set baseline to current sensor count
+      return hourly;
+    }
+
+    // 2. Retrieve the baseline steps we started the day with
+    const baselineStr = await AsyncStorage.getItem(STEPS_TOTAL_KEY);
+    const baselineSteps = baselineStr ? parseInt(baselineStr, 10) : totalSteps;
+
+    // 3. Calculate steps actually taken TODAY
+    const stepsToday = Math.max(0, totalSteps - baselineSteps);
+
+    // 4. Calculate how many steps we need to distribute to the current hour
+    const prevDistributed = hourly.reduce((a, b) => a + b, 0);
+    const delta = Math.max(0, stepsToday - prevDistributed);
+
     if (delta === 0) return hourly;
+
+    // 5. Add the delta steps to the current hour slot
     const h = new Date().getHours();
     hourly[h] = (hourly[h] || 0) + delta;
+
+    // 6. Persist to storage
     await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourly));
-    await AsyncStorage.setItem(STEPS_TOTAL_KEY, String(totalSteps));
+    
     return hourly;
-  } catch { return new Array(24).fill(0); }
+  } catch (err) { 
+    console.error("Error updating hourly steps:", err);
+    return Array(24).fill(0);
+  }
 }
 
 async function getPersistedTotal() {
@@ -172,12 +224,44 @@ async function getPersistedTotal() {
     if (savedDate !== todayString()) return 0;
     const saved = await AsyncStorage.getItem(STEPS_TOTAL_KEY);
     return saved ? parseInt(saved, 10) : 0;
-  } catch { return 0; }
+  } catch (err) { return 0; }
+}
+
+/**
+ * Saves raw hourly sync data (like from Google Fit) directly to AsyncStorage.
+ * This completely bypasses the flat/uniform fallback distribution.
+ * @param {number[]} hourlyArray - An array of 24 numbers representing steps per hour.
+ */
+export async function saveSyncedHourlySteps(hourlyArray) {
+  try {
+    if (!Array.isArray(hourlyArray) || hourlyArray.length !== 24) {
+      throw new Error("Invalid hourly step array. Must be 24 elements.");
+    }
+
+    const totalSteps = hourlyArray.reduce((a, b) => a + b, 0);
+    
+    // Save everything cleanly under today's date key
+    await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
+    await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourlyArray));
+    await AsyncStorage.setItem(STEPS_TOTAL_KEY, String(totalSteps));
+    
+    console.log("✅ Successfully saved Google Fit hourly sync data to storage!", {
+      totalSteps,
+      hourlyArray
+    });
+    
+    return { success: true, totalSteps, hourlySteps: hourlyArray };
+  } catch (err) {
+    console.error("❌ Failed to write Google Fit sync to AsyncStorage:", err);
+    return { success: false, error: err.message };
+  }
 }
 
 // iOS: reconstruct hourly breakdown from HealthKit hour-by-hour queries
 async function buildHourlyFromiOS() {
-  const hourly = new Array(24).fill(0);
+  const hourly = [];
+  for (let i = 0; i < 24; i++) hourly.push(0);
+  
   const currentHour = new Date().getHours();
   for (let h = 0; h <= currentHour; h++) {
     const start = new Date(); start.setHours(h, 0, 0, 0);
@@ -186,7 +270,7 @@ async function buildHourlyFromiOS() {
     try {
       const result = await Pedometer.getStepCountAsync(start, end);
       hourly[h] = result?.steps ?? 0;
-    } catch { hourly[h] = 0; }
+    } catch (err) { hourly[h] = 0; }
   }
   await AsyncStorage.setItem(STEPS_DATE_KEY, todayString());
   await AsyncStorage.setItem(STEPS_HOURLY_KEY, JSON.stringify(hourly));
@@ -205,19 +289,33 @@ export function estimateDistanceFromSteps(steps, heightCm = 170) {
 // Simple estimate when no hourly data (e.g. web fallback)
 export function estimateCaloriesFromSteps(steps, weightKg = 65, heightCm = 170, age = 30, sex = "male") {
   if (steps === 0) return 0;
-  const hourly = new Array(24).fill(0);
+  
+  const hourly = [];
+  for (let i = 0; i < 24; i++) hourly.push(0);
+  
   // Spread steps across likely active hours (6am-10pm) proportionally
   const activeHours = 16;
   const stepsPerHour = Math.floor(steps / activeHours);
   for (let h = 6; h < 22; h++) hourly[h] = stepsPerHour;
   hourly[6] += steps - stepsPerHour * activeHours; // remainder added cleanly to index 6
-  return calculateDayCalories(hourly, weightKg, heightCm, age, sex);
+  
+  const totalWithBmr = calculateDayCalories(hourly, weightKg, heightCm, age, sex);
+  const bmr = calculateBMR(weightKg, heightCm, age, sex);
+  
+  // Active hours only account for a fraction of the daily BMR
+  const currentHour = new Date().getHours();
+  const activeBmrHours = Math.min(currentHour + 1, 24);
+  const bmrFraction = (bmr / 24) * activeBmrHours;
+
+  // Subtract the BMR baseline to get ONLY the calories burned from movement
+  const netActive = Math.max(0, totalWithBmr - bmrFraction);
+  return Math.round(netActive);
 }
 
 export async function isPedometerAvailable() {
   if (!isNative || !Pedometer) return false;
   try { return await Pedometer.isAvailableAsync(); }
-  catch { return false; }
+  catch (err) { return false; }
 }
 
 export async function requestPedometerPermission() {
@@ -225,7 +323,7 @@ export async function requestPedometerPermission() {
   try {
     const { status } = await Pedometer.requestPermissionsAsync();
     return status === "granted";
-  } catch { return false; }
+  } catch (err) { return false; }
 }
 
 export async function getTodayStepCount() {
@@ -236,12 +334,15 @@ export async function getTodayStepCount() {
     try {
       const result = await Pedometer.getStepCountAsync(start, end);
       return result?.steps ?? 0;
-    } catch { return 0; }
+    } catch (err) { return 0; }
   }
   return await getPersistedTotal();
 }
-// Live subscription with dynamic speed from rolling window
-export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, heightCm = 170, age = 30, sex = "male") {
+
+let lastSyncedStepCount = 0;
+
+/// Live subscription with dynamic speed from rolling window
+export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, heightCm = 170, age = 30, sex = "male", userId = null) {
   if (!isNative || !Pedometer) return { remove: () => {} };
 
   const WINDOW_MS = 60000; // 60-second rolling window for speed
@@ -267,7 +368,8 @@ export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, h
       
       if (timeSec > 0 && stepDelta > 5) {
         // Estimate stride length dynamically using the cadence/step intensity inside the live window
-        const bucketData = classifyHour(stepDelta, heightCm);
+        const stepsPerHourRate = (stepDelta / timeSec) * 3600;
+        const bucketData = classifyHour(stepsPerHourRate, heightCm);
         const strideM = bucketData.strideM > 0 ? bucketData.strideM : (heightCm / 100) * 0.414;
         measuredSpeed_ms = (stepDelta * strideM) / timeSec;
       }
@@ -286,15 +388,45 @@ export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, h
       caloriesBurned += caloriesForHour(hourlySteps[h] || 0, weightKg, heightCm, bmrPerHour);
     }
     
-    // Current hour uses measured speed from rolling window
-    caloriesBurned += caloriesForHour(
-      hourlySteps[currentHour] || 0,
-      weightKg, heightCm, bmrPerHour, measuredSpeed_ms
-    );
-    caloriesBurned = Math.round(caloriesBurned);
+    // Current hour uses measured speed from rolling window and minute proportion for BMR
+    const liveHourTotal = caloriesForHour(hourlySteps[currentHour] || 0, weightKg, heightCm, bmrPerHour, measuredSpeed_ms);
+    const liveHourActiveComponent = liveHourTotal - bmrPerHour;
+    const liveHourProportionalBmr = bmrPerHour * (new Date().getMinutes() / 60);
+    
+    caloriesBurned = Math.round(caloriesBurned + liveHourProportionalBmr + liveHourActiveComponent);
+
+    // Calculate precise elapsed BMR to isolate real active calories
+    const preciseHoursElapsed = currentHour + (new Date().getMinutes() / 60);
+    const totalBmrElapsed = bmrPerHour * preciseHoursElapsed;
+    let activeCalories = Math.max(0, Math.round(caloriesBurned - totalBmrElapsed));
+
+    // Fallback: If calculated active calories is <= 0 but they are actively taking steps,
+    // fallback to step-based estimation so they do not see a flat 0.
+    if (activeCalories <= 0 && totalSteps > 0) {
+      activeCalories = Math.round(estimateCaloriesFromSteps(totalSteps, weightKg, heightCm, age, sex));
+    }
 
     const distanceKm = estimateDistanceFromSteps(totalSteps, heightCm);
-    onUpdate({ totalSteps, caloriesBurned, distanceKm });
+
+    // Pass the complete payload to the listener!
+    onUpdate({ 
+      totalSteps, 
+      caloriesBurned, 
+      activeCalories, 
+      distanceKm,
+      hourlySteps
+    });
+
+    // === NEW FIRESTORE BATCH SYNC ===
+    // Sync to cloud if user is logged in and steps delta cross the 50 step boundary
+    if (userId && hourlySteps) {
+      if (Math.abs(totalSteps - lastSyncedStepCount) >= 50) {
+        // Execute syncNativeActivityToFirestore we dropped at the bottom of the file
+        syncNativeActivityToFirestore(userId, hourlySteps, { weightKg, heightCm, age, sex });
+        lastSyncedStepCount = totalSteps;
+      }
+    }
+    // ================================
   });
 
   return sub;
@@ -302,16 +434,91 @@ export function subscribeToStepUpdates(onUpdate, baseSteps = 0, weightKg = 65, h
 
 export async function getTodayActivity(weightKg = 65, heightCm = 170, age = 30, sex = "male") {
   if (!isNative || !Pedometer) {
-    return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
+    return { steps: 0, caloriesBurned: 0, activeCalories: 0, distanceKm: 0, available: false };
   }
+  
   const available = await isPedometerAvailable();
-  if (!available) return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
+  if (!available) return { steps: 0, caloriesBurned: 0, activeCalories: 0, distanceKm: 0, available: false };
+  
   const granted = await requestPedometerPermission();
-  if (!granted) return { steps: 0, caloriesBurned: 0, distanceKm: 0, available: false };
+  if (!granted) return { steps: 0, caloriesBurned: 0, activeCalories: 0, distanceKm: 0, available: false };
 
   const steps = await getTodayStepCount();
   const hourlySteps = isIOS ? await buildHourlyFromiOS() : await getHourlySteps();
+  
+  // 1. Calculate total BMR + Activity calories
   const caloriesBurned = calculateDayCalories(hourlySteps, weightKg, heightCm, age, sex);
+  
+  const bmr = calculateBMR(weightKg, heightCm, age, sex);
+  const bmrPerHour = bmr / 24;
+  const currentHour = new Date().getHours();
+  const currentMinutes = new Date().getMinutes();
+  
+  const preciseHoursElapsed = currentHour + (currentMinutes / 60);
+  const totalBmrElapsed = bmrPerHour * preciseHoursElapsed;
+  let activeCalories = Math.max(0, Math.round(caloriesBurned - totalBmrElapsed));
+
+  // 🌟 SAFETY FALLBACK: If active calories calculates as 0 but steps exist, use the estimator
+  if (activeCalories <= 0 && steps > 0) {
+    activeCalories = Math.round(estimateCaloriesFromSteps(steps, weightKg, heightCm, age, sex));
+  }
+
   const distanceKm = estimateDistanceFromSteps(steps, heightCm);
-  return { steps, caloriesBurned, distanceKm, available: true };
+
+  return { 
+    steps, 
+    caloriesBurned, 
+    activeCalories, // ✅ Correctly fallback estimated on startup now!
+    distanceKm, 
+    available: true 
+  };
+}
+import { saveActivityToFirestore } from '../config/firebase';
+
+/**
+ * Periodically backs up native iOS/Android step tracking metrics to Firestore
+ * @param {string} userId - Unique ID of the authenticated user
+ * @param {Array<number>} hourlySteps - The current 24-hour step distribution array
+ * @param {object} profile - User baseline data containing weightKg, heightCm, age, sex
+ */
+export async function syncNativeActivityToFirestore(userId, hourlySteps, profile) {
+  if (!userId || !hourlySteps) return;
+
+  const weightKg = profile?.weightKg || 70;
+  const heightCm = profile?.heightCm || 170;
+  const age = profile?.age || 30;
+  const sex = profile?.sex || "male";
+
+  // 1. Calculate combined (BMR + Activity) from the current native hourly step array
+  const computedCalories = calculateDayCalories(hourlySteps, weightKg, heightCm, age, sex);
+  
+  // 2. Isolate Active Calories by subtracting precise elapsed BMR down to the minute
+  const bmr = calculateBMR(weightKg, heightCm, age, sex);
+  const bmrPerHour = bmr / 24;
+  
+  const currentDate = new Date();
+  const preciseHoursElapsed = currentDate.getHours() + (currentDate.getMinutes() / 60);
+  const totalBmrElapsed = bmrPerHour * preciseHoursElapsed;
+  const actualActiveCalories = Math.round(Math.max(0, computedCalories - totalBmrElapsed));
+
+  // 3. Compute structural sums
+  const totalSteps = hourlySteps.reduce((a, b) => a + b, 0);
+  const STRIDE_LENGTH_KM = 0.000762;
+  const heightFactor = heightCm / 170;
+  const totalDistanceKm = Math.round(totalSteps * STRIDE_LENGTH_KM * heightFactor * 100) / 100;
+
+  const activityPayload = {
+    steps: totalSteps,
+    caloriesBurned: computedCalories,
+    activeCalories: actualActiveCalories,
+    distanceKm: totalDistanceKm,
+    hourlySteps: hourlySteps // This maps cleanly to the Firestore array payload
+  };
+
+  try {
+    await saveActivityToFirestore(userId, activityPayload);
+    console.log("Successfully mirrored native physical steps to Firestore logs.");
+  } catch (error) {
+    console.error("Native Firestore sync cycle failed silently:", error);
+  }
 }

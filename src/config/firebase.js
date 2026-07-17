@@ -26,7 +26,7 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 // @ts-ignore
 import { initializeAuth, getAuth, getReactNativePersistence } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, doc, setDoc } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -51,5 +51,41 @@ try {
 }
 
 const db = getFirestore(app);
+
+/**
+ * Saves or updates daily activity tracking snapshots to Firestore
+ * @param {string} userId - Unique ID of the logged-in user
+ * @param {object} activityData - Calculated steps, calories, and arrays
+ */
+export async function saveActivityToFirestore(userId, activityData) {
+  if (!userId) {
+    console.warn("Skipping Firestore sync: No authenticated userId provided.");
+    return;
+  }
+
+  // Generate date key format matching your app baseline (e.g., "2026-07-16")
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const dateKey = `${year}-${month}-${day}`;
+
+  // Reference path: users/{userId}/daily_activity/{dateKey}
+  const docRef = doc(db, "users", userId, "logs", dateKey);
+  
+
+  const payload = {
+    date: dateKey,
+    totalSteps: activityData.steps,
+    caloriesBurned: activityData.caloriesBurned,
+    activeCalories: activityData.activeCalories,
+    distanceKm: activityData.distanceKm,
+    hourlySteps: activityData.hourlySteps, 
+    lastSyncedAt: new Date().toISOString()
+  };
+
+  // merge: true updates specific keys safely without wiping out other daily profile settings
+  await setDoc(docRef, payload, { merge: true });
+}
 
 export { app, auth, db };
